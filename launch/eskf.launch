@@ -16,15 +16,19 @@
 
   <!-- EXTENDED STATE topic to use -->
   <arg name="extended_state_topic" default="/mavros/extended_state"/>
-
+  
+  <!-- VISION PUB topic to use -->
+  <arg name="vision_pub_topic" default="/mavros/vision_pose/pose_cov"/>
+  
   <node pkg="eskf" name="$(arg eskf_node)" type="eskf" output="screen">
     <remap from="~imu" to="$(arg imu_topic)"/>
     <remap from="~vision" to="$(arg vision_topic)"/>
     <remap from="~gps" to="$(arg gps_topic)"/>
     <remap from="~optical_flow" to="$(arg optical_flow_topic)"/>
     <remap from="~extended_state" to="$(arg extended_state_topic)"/>
+    <remap from="~pose" to="$(arg vision_pub_topic)"/>
     
-    <param name="fusion_mask" value="386"  type="int"/>
+    <param name="fusion_mask" value="7"  type="int"/>
     <!-- 
      1 - vision position. 
      2 - vision yaw. 
