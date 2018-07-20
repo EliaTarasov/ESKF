@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<package>
+  <name>eskf</name>
+  <version>0.0.1</version>
+  <description>Error state kalman filter for attitude determination</description>
+
+  <maintainer email="elias.tarasov@gmail.com">etarasov</maintainer>
+  <author>Elia Tarasov</author>
+  <license>Apache 2</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>gazebo_ros</buildtool_depend>
+  
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>message_filters</build_depend>
+  <build_depend>message_generation</build_depend>
+  <build_depend>eigen_conversions</build_depend>
+  <build_depend>mavros_msgs</build_depend>
+  <build_depend>mavros</build_depend>
+  <build_depend>gazebo_ros</build_depend>
+  
+  <run_depend>geometry_msgs</run_depend>
+  <run_depend>roscpp</run_depend>
+  <run_depend>sensor_msgs</run_depend>
+  <run_depend>message_filters</run_depend>
+  <run_depend>message_runtime</run_depend>
+  <run_depend>eigen_conversions</run_depend>
+  <run_depend>sensor_msgs</run_depend>
+  <run_depend>mavros</run_depend>
+  <run_depend>gazebo_ros</run_depend>
+  
+  <export>
+  </export>
+</package>

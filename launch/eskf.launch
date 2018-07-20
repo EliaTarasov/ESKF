@@ -1,0 +1,43 @@
+<launch>
+  <!-- Name of the node -->
+  <arg name="eskf_node" default="eskf"/>
+
+  <!-- IMU topic to use -->
+  <arg name="imu_topic" default="/mavros/imu/data_raw"/>
+
+  <!-- VISION topic to use -->
+  <arg name="vision_topic" default="/svo/pose"/>
+
+  <!-- GPS topic to use -->
+  <arg name="gps_topic" default="/mavros/global_position/local"/>
+
+  <!-- OPTICAL FLOW topic to use -->
+  <arg name="optical_flow_topic" default="/mavros/px4flow/raw/optical_flow_rad"/>
+
+  <!-- EXTENDED STATE topic to use -->
+  <arg name="extended_state_topic" default="/mavros/extended_state"/>
+
+  <node pkg="eskf" name="$(arg eskf_node)" type="eskf" output="screen">
+    <remap from="~imu" to="$(arg imu_topic)"/>
+    <remap from="~vision" to="$(arg vision_topic)"/>
+    <remap from="~gps" to="$(arg gps_topic)"/>
+    <remap from="~optical_flow" to="$(arg optical_flow_topic)"/>
+    <remap from="~extended_state" to="$(arg extended_state_topic)"/>
+    
+    <param name="fusion_mask" value="386"  type="int"/>
+    <!-- 
+     1 - vision position. 
+     2 - vision yaw. 
+     4 - vision height. 
+     8 - gps position. 
+     16 - gps velocity
+     32 - gps height.
+     64 - mag yaw. 
+     128 - optical flow. 
+     256 - lidar height.
+     -->
+     
+     <param name="publish_rate" value="10" type="int"/>
+  </node>
+
+</launch>
