@@ -3,8 +3,6 @@
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
-#include <ros/time.h>
-#include <ros/ros.h>
 
 #include <RingBuffer.hpp>
 
@@ -266,7 +264,12 @@ namespace eskf {
 
     vec2 velObsVarNE_;		///< 1-STD observation noise variance used for the fusion of NE velocity data (m/sec)**2
     scalar_t hvelInnovGate_ {1.0f};		///< Number of standard deviations used for the horizontal velocity fusion innovation consistency check
-
+    
+    scalar_t heading_innov_ {0.0f};
+    bool mag_use_inhibit_{false};		///< true when magnetomer use is being inhibited
+    bool mag_use_inhibit_prev_{false};	///< true when magnetomer use was being inhibited the previous frame
+    scalar_t last_static_yaw_{0.0f};		///< last yaw angle recorded when on ground motion checks were passing (rad)
+    
     /**
       * @brief Quaternion for rotation between ENU and NED frames
       *
@@ -301,6 +304,8 @@ namespace eskf {
     bool fuse_vert_vel_ = false;
     bool rng_hgt_ = false;
     bool in_air_ = false;
+    bool vehicle_at_rest_ = !in_air_; // true when the vehicle is at rest
+    bool vehicle_at_rest_prev_ {false}; ///< true when the vehicle was at rest the previous time the status was checked
     vec3 last_known_posNED_;
   };
 }

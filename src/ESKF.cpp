@@ -663,7 +663,7 @@ namespace eskf {
        // we are not yet using flow data
       if ((fusion_mask_ & MASK_OPTICAL_FLOW) && (!opt_flow_)) {
         opt_flow_ = true;
-        ROS_INFO("ESKF commencing optical flow fusion");
+        printf("ESKF commencing optical flow fusion\n");
       }
       
       // Only fuse optical flow if valid body rate compensation data is available
@@ -1210,6 +1210,13 @@ namespace eskf {
     }
   }
 
+  void ESKF::controlMagFusion() {
+    if(fusion_mask_ & MASK_MAG_YAW) {
+      mag_use_inhibit_ = true;
+      fuseHeading();
+    }
+  }
+
   void ESKF::controlExternalVisionFusion() {
     if(vision_data_ready_) {
       // Fuse available NED position data into the main filter
@@ -1217,7 +1224,7 @@ namespace eskf {
         // check for an external vision measurement that has fallen behind the fusion time horizon
         if (time_last_imu_ - time_last_ext_vision_ < 2 * EV_MAX_INTERVAL) {
           ev_pos_ = true;
-          ROS_INFO("ESKF commencing external vision position fusion");
+          printf("ESKF commencing external vision position fusion\n");
         }
         // reset the position if we are not already aiding using GPS, else use a relative position method for fusing the position data
         if (gps_pos_) {
@@ -1243,7 +1250,7 @@ namespace eskf {
           state_.quat_nominal = from_axis_angle(euler_init);
 
           ev_yaw_ = true;
-          ROS_INFO("EKF commencing external vision yaw fusion");
+          printf("ESKF commencing external vision yaw fusion\n");
         }
       }
       
@@ -1252,7 +1259,7 @@ namespace eskf {
         // don't start using EV data unless data is arriving frequently
         if (time_last_imu_ - time_last_ext_vision_ < 2 * EV_MAX_INTERVAL) {
           ev_hgt_ = true;
-          ROS_INFO("EKF commencing external vision hgt fusion");
+          printf("ESKF commencing external vision hgt fusion\n");
           if(rng_hgt_) {
             //
           } else {
@@ -1284,7 +1291,7 @@ namespace eskf {
     if (gps_data_ready_) {
       if ((fusion_mask_ & MASK_GPS_POS) && (!gps_pos_)) {
         gps_pos_ = true;
-        ROS_INFO("ESKF commencing GPS pos fusion");
+        printf("ESKF commencing GPS pos fusion\n");
       }
       if(gps_pos_) {
         fuse_pos_ = true;
@@ -1294,7 +1301,7 @@ namespace eskf {
       }
       if ((fusion_mask_ & MASK_GPS_HGT) && (!gps_hgt_)) {
         gps_hgt_ = true;
-        ROS_INFO("ESKF commencing GPS hgt fusion");
+        printf("ESKF commencing GPS hgt fusion\n");
       }
       if(gps_pos_) {
         fuse_height_ = true;
@@ -1313,7 +1320,7 @@ namespace eskf {
           resetVelocity();
 
           if (time_last_fake_gps_ != 0) {
-            ROS_INFO("ESKF stopping navigation");
+            printf("ESKF stopping navigation\n");
           }
         }
 
@@ -1990,14 +1997,35 @@ namespace eskf {
     // wrap the heading to the interval between +-pi
     measured_hdg = wrap_pi(measured_hdg);
 
-    // calculate the innovation
-    scalar_t heading_innov = predicted_hdg - measured_hdg;
-
+    if (mag_use_inhibit_) {
+      // The magnetomer cannot be trusted but we need to fuse a heading to prevent a badly conditoned covariance matrix developing over time.
+      if (!vehicle_at_rest_) {
+        // Vehicle is not at rest so fuse a zero innovation and record the predicted heading to use as an observation when movement ceases.
+        heading_innov_ = 0.0f;
+        vehicle_at_rest_prev_ = false;
+      } else {
+        // Vehicle is at rest so use the last moving prediciton as an observation to prevent the heading from drifting and to enable yaw gyro bias learning before takeoff.
+        if (!vehicle_at_rest_prev_ || !mag_use_inhibit_prev_) {
+          last_static_yaw_ = predicted_hdg;
+          vehicle_at_rest_prev_ = true;
+        }
+        // calculate the innovation
+        heading_innov_ = predicted_hdg - last_static_yaw_;
+        R_YAW = 0.01f;
+        heading_innov_gate_ = 5.0f;
+      }
+    } else {
+      // calculate the innovation
+      heading_innov_ = predicted_hdg - measured_hdg;
+      last_static_yaw_ = predicted_hdg;
+    }
+    mag_use_inhibit_prev_ = mag_use_inhibit_;
+    
     // wrap the innovation to the interval between +-pi
-    heading_innov = wrap_pi(heading_innov);
+    heading_innov_ = wrap_pi(heading_innov_);
     
     // innovation test ratio
-    scalar_t yaw_test_ratio = sq(heading_innov) / (sq(heading_innov_gate_) * heading_innov_var);
+    scalar_t yaw_test_ratio = sq(heading_innov_) / (sq(heading_innov_gate_) * heading_innov_var);
 	  
     // set the vision yaw unhealthy if the test fails
     if (yaw_test_ratio > 1.0f) {
@@ -2006,7 +2034,7 @@ namespace eskf {
       else {
         // constrain the innovation to the maximum set by the gate
         scalar_t gate_limit = sqrtf(sq(heading_innov_gate_) * heading_innov_var);
-        heading_innov = constrain(heading_innov, -gate_limit, gate_limit);
+        heading_innov_ = constrain(heading_innov_, -gate_limit, gate_limit);
       }
     }
     
@@ -2058,7 +2086,7 @@ namespace eskf {
       fixCovarianceErrors();
 
       // apply the state corrections
-      fuse(Kfusion, heading_innov);
+      fuse(Kfusion, heading_innov_);
     }
   }
   
