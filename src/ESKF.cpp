@@ -650,6 +650,7 @@ namespace eskf {
     controlExternalVisionFusion();
     controlGpsFusion();
     controlOpticalFlowFusion();
+    controlMagFusion();
     
     runTerrainEstimator();
   }
