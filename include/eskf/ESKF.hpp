@@ -24,6 +24,19 @@
 #define MASK_EV (MASK_EV_POS | MASK_EV_YAW | MASK_EV_HGT)
 #define MASK_GPS (MASK_GPS_POS | MASK_GPS_VEL | MASK_GPS_HGT)
 
+// GPS pre-flight check bit locations
+#define MASK_GPS_NSATS  (1<<0)
+#define MASK_GPS_GDOP   (1<<1)
+#define MASK_GPS_HACC   (1<<2)
+#define MASK_GPS_VACC   (1<<3)
+#define MASK_GPS_SACC   (1<<4)
+#define MASK_GPS_HDRIFT (1<<5)
+#define MASK_GPS_VDRIFT (1<<6)
+#define MASK_GPS_HSPD   (1<<7)
+#define MASK_GPS_VSPD   (1<<8)
+
+#include "geo.h"
+
 namespace eskf {
 
   typedef float scalar_t;
@@ -86,7 +99,7 @@ namespace eskf {
     mat3 quat2dcm(const quat& q);
     vec3 dcm2vec(const mat3& dcm);
     bool calcOptFlowBodyRateComp();
-
+    
     /* State vector:
      * Attitude quaternion
      * NED velocity
@@ -128,6 +141,24 @@ namespace eskf {
       uint64_t  time_us;	///< timestamp of the measurement (uSec)
     };
 
+    struct gps_message {
+      uint64_t time_usec;
+      int32_t lat;		///< Latitude in 1E-7 degrees
+      int32_t lon;		///< Longitude in 1E-7 degrees
+      int32_t alt;		///< Altitude in 1E-3 meters (millimeters) above MSL
+      float yaw;		///< yaw angle. NaN if not set (used for dual antenna GPS), (rad, [-PI, PI])
+      float yaw_offset;	///< Heading/Yaw offset for dual antenna GPS - refer to description for GPS_YAW_OFFSET
+      uint8_t fix_type;	///< 0-1: no fix, 2: 2D fix, 3: 3D fix, 4: RTCM code differential, 5: Real-Time Kinematic
+      float eph;		///< GPS horizontal position accuracy in m
+      float epv;		///< GPS vertical position accuracy in m
+      float sacc;		///< GPS speed accuracy in m/s
+      float vel_m_s;		///< GPS ground speed (m/sec)
+      float vel_ned[3];	///< GPS ground speed NED
+      bool vel_ned_valid;	///< GPS ground speed is valid
+      uint8_t nsats;		///< number of satellites used
+      float gdop;		///< geometric dilution of precision
+    };
+
     struct optFlowSample {
       uint8_t  quality;	///< quality indicator between 0 and 255
       vec2 flowRadXY;	///< measured delta angle of the image about the X and Y body axes (rad), RH rotaton is positive
@@ -145,6 +176,7 @@ namespace eskf {
     int fusion_mask_ = MASK_EV_POS && MASK_EV_YAW && MASK_EV_HGT; /// < ekf fusion mask (see launch file), vision pose set by default 
 
     bool collect_imu(imuSample& imu);
+    bool gps_is_good(gps_message *gps);
 
     const unsigned FILTER_UPDATE_PERIOD_MS = 12;	///< ekf prediction period in milliseconds - this should ideally be an integer multiple of the IMU time delta
 

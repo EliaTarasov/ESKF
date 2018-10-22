@@ -39,11 +39,16 @@ add_library(ESKF
   src/ESKF.cpp
 )
 
+add_library(geo
+  src/geo.cpp
+)
+
 set(RELEVANT_LIBRARIES
   ESKF
   ${catkin_LIBRARIES}
   ${mavros_LIBRARIES}
   ${GAZEBO_LIBRARIES}
+  geo
 )
 
 # rigorous error checking
