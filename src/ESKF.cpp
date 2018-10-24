@@ -9,116 +9,6 @@ using namespace Eigen;
 
 namespace eskf {
 
-  template <typename T> inline T sq(T var) {
-    return var * var;
-  }
-  
-  template <typename T> inline T max(T val1, T val2) {
-    return (val1 > val2) ? val1 : val2;
-  }
-  
-  template<typename Scalar>
-  static inline constexpr const Scalar &constrain(const Scalar &val, const Scalar &min_val, const Scalar &max_val) {
-    return (val < min_val) ? min_val : ((val > max_val) ? max_val : val);
-  }
-
-  template<typename Type>
-  Type wrap_pi(Type x) {
-    while (x >= Type(M_PI)) {
-      x -= Type(2.0 * M_PI);
-    }
-
-    while (x < Type(-M_PI)) {
-      x += Type(2.0 * M_PI);
-    }
-    return x;
-  }
-
-  quat ESKF::from_axis_angle(vec3 vec) {
-    quat q;
-    scalar_t theta = vec.norm();
-
-    if (theta < scalar_t(1e-10)) {
-      q.w() = scalar_t(1.0);
-      q.x() = q.y() = q.z() = 0;
-      return q;
-    }
-
-    vec3 tmp = vec / theta;
-    return from_axis_angle(tmp, theta);
-  }
-
-  quat ESKF::from_axis_angle(const vec3 &axis, scalar_t theta) {
-    quat q;
-
-    if (theta < scalar_t(1e-10)) {
-      q.w() = scalar_t(1.0);
-      q.x() = q.y() = q.z() = 0;
-    }
-
-    scalar_t magnitude = sin(theta / 2.0f);
-
-    q.w() = cos(theta / 2.0f);
-    q.x() = axis(0) * magnitude;
-    q.y() = axis(1) * magnitude;
-    q.z() = axis(2) * magnitude;
-    
-    return q;
-  }
-
-  vec3 ESKF::to_axis_angle(const quat& q) {
-    scalar_t axis_magnitude = scalar_t(sqrt(q.x() * q.x() + q.y() * q.y() + q.z() * q.z()));
-    vec3 vec;
-    vec(0) = q.x();
-    vec(1) = q.y();
-    vec(2) = q.z();
-
-    if (axis_magnitude >= scalar_t(1e-10)) {
-      vec = vec / axis_magnitude;
-      vec = vec * wrap_pi(scalar_t(2.0) * atan2(axis_magnitude, q.w()));
-    }
-
-    return vec;
-  }
-
-  mat3 ESKF::quat2dcm(const quat& q) {
-    mat3 dcm;
-    scalar_t a = q.w();
-    scalar_t b = q.x();
-    scalar_t c = q.y();
-    scalar_t d = q.z();
-    scalar_t aSq = a * a;
-    scalar_t bSq = b * b;
-    scalar_t cSq = c * c;
-    scalar_t dSq = d * d;
-    dcm(0, 0) = aSq + bSq - cSq - dSq;
-    dcm(0, 1) = 2 * (b * c - a * d);
-    dcm(0, 2) = 2 * (a * c + b * d);
-    dcm(1, 0) = 2 * (b * c + a * d);
-    dcm(1, 1) = aSq - bSq + cSq - dSq;
-    dcm(1, 2) = 2 * (c * d - a * b);
-    dcm(2, 0) = 2 * (b * d - a * c);
-    dcm(2, 1) = 2 * (a * b + c * d);
-    dcm(2, 2) = aSq - bSq - cSq + dSq;
-    return dcm;
-  }
-
-  vec3 ESKF::dcm2vec(const mat3& dcm) {
-    scalar_t phi_val = atan2(dcm(2, 1), dcm(2, 2));
-    scalar_t theta_val = asin(-dcm(2, 0));
-    scalar_t psi_val = atan2(dcm(1, 0), dcm(0, 0));
-    scalar_t pi = M_PI;
-
-    if (fabs(theta_val - pi / 2) < 1.0e-3) {
-      phi_val = 0.0;
-      psi_val = atan2(dcm(1, 2), dcm(0, 2));
-    } else if (fabs(theta_val + pi / 2) < 1.0e-3) {
-      phi_val = 0.0;
-      psi_val = atan2(-dcm(1, 2), -dcm(0, 2));
-    }
-    return vec3(phi_val, theta_val, psi_val);
-  }
-
   ESKF::ESKF() {
     // zeros state_
     state_.quat_nominal = quat(1, 0, 0, 0);
@@ -174,14 +64,17 @@ namespace eskf {
       range_buffer_.push(range_sample_init);
     }
 
-    last_known_posNED_ = vec3(0, 0, 0);
-    delVel_sum_ = vec3(0, 0, 0);
-
     dt_ekf_avg_ = 0.001f * (scalar_t)(FILTER_UPDATE_PERIOD_MS);
 
+    ///< filter initialisation
+    NED_origin_initialised_ = false;
     filter_initialised_ = false;
+    terrain_initialised_ = false;
+    delVel_sum_ = vec3(0, 0, 0);
+
     imu_updated_ = false;
     memset(vel_pos_innov_, 0, 6*sizeof(scalar_t));
+    last_known_posNED_ = vec3(0, 0, 0);
   }
 
   void ESKF::initialiseCovariance() {
@@ -2090,34 +1983,7 @@ namespace eskf {
       fuse(Kfusion, heading_innov_);
     }
   }
-  
-  // calculate the inverse rotation matrix from a quaternion rotation
-  mat3 ESKF::quat_to_invrotmat(const quat &q) {
-    scalar_t q00 = q.w() * q.w();
-    scalar_t q11 = q.x() * q.x();
-    scalar_t q22 = q.y() * q.y();
-    scalar_t q33 = q.z() * q.z();
-    scalar_t q01 = q.w() * q.x();
-    scalar_t q02 = q.w() * q.y();
-    scalar_t q03 = q.w() * q.z();
-    scalar_t q12 = q.x() * q.y();
-    scalar_t q13 = q.x() * q.z();
-    scalar_t q23 = q.y() * q.z();
 
-    mat3 dcm;
-    dcm(0, 0) = q00 + q11 - q22 - q33;
-    dcm(1, 1) = q00 - q11 + q22 - q33;
-    dcm(2, 2) = q00 - q11 - q22 + q33;
-    dcm(0, 1) = 2.0f * (q12 - q03);
-    dcm(0, 2) = 2.0f * (q13 + q02);
-    dcm(1, 0) = 2.0f * (q12 + q03);
-    dcm(1, 2) = 2.0f * (q23 - q01);
-    dcm(2, 0) = 2.0f * (q13 - q02);
-    dcm(2, 1) = 2.0f * (q23 + q01);
-    
-    return dcm;
-  }
-  
   void ESKF::fixCovarianceErrors() {
     scalar_t P_lim[4] = {};
     P_lim[0] = 1.0f;		// quaternion max var
@@ -2359,5 +2225,164 @@ namespace eskf {
 
   void ESKF::setFusionMask(int fusion_mask) {
     fusion_mask_ = fusion_mask;
+  }
+
+  bool ESKF::collect_gps(uint64_t time_usec, gps_message *gps) {
+    // Run GPS checks always
+    bool gps_checks_pass = gps_is_good(gps);
+    if (!NED_origin_initialised_ && gps_checks_pass) {
+      // If we have good GPS data set the origin's WGS-84 position to the last gps fix
+      double lat = gps->lat / 1.0e7;
+      double lon = gps->lon / 1.0e7;
+      map_projection_init_timestamped(&pos_ref_, lat, lon, time_last_imu_);
+
+      // if we are already doing aiding, corect for the change in posiiton since the EKF started navigating
+      if (opt_flow_ || gps_pos_ || ev_pos_) {
+        double est_lat, est_lon;
+        map_projection_reproject(&pos_ref_, -state_.pos(0), -state_.pos(1), &est_lat, &est_lon);
+        map_projection_init_timestamped(&pos_ref_, est_lat, est_lon, time_last_imu_);
+      }
+
+      // Take the current GPS height and subtract the filter height above origin to estimate the GPS height of the origin
+      gps_alt_ref_ = 1e-3f * (float)gps->alt + state_.pos(2);
+      NED_origin_initialised_ = true;
+      last_gps_origin_time_us_ = time_last_imu_;
+
+      // save the horizontal and vertical position uncertainty of the origin
+      gps_origin_eph_ = gps->eph;
+      gps_origin_epv_ = gps->epv;
+
+      printf("EKF GPS checks passed (WGS-84 origin set)\n");
+    }
+
+    // start collecting GPS if there is a 3D fix and the NED origin has been set
+    return NED_origin_initialised_ && (gps->fix_type >= 3);
+  }
+
+  bool ESKF::gps_is_good(gps_message *gps) {
+    // Check the fix type
+    gps_check_fail_status_.flags.fix = (gps->fix_type < 3);
+
+    // Check the number of satellites
+    gps_check_fail_status_.flags.nsats = (gps->nsats < req_nsats);
+
+    // Check the geometric dilution of precision
+    gps_check_fail_status_.flags.gdop = (gps->gdop > req_gdop);
+
+    // Check the reported horizontal and vertical position accuracy
+    gps_check_fail_status_.flags.hacc = (gps->eph > req_hacc);
+    gps_check_fail_status_.flags.vacc = (gps->epv > req_vacc);
+
+    // Check the reported speed accuracy
+    gps_check_fail_status_.flags.sacc = (gps->sacc > req_sacc);
+
+    // check if GPS quality is degraded
+    gps_error_norm_ = fmaxf((gps->eph / req_hacc) , (gps->epv / req_vacc));
+    gps_error_norm_ = fmaxf(gps_error_norm_ , (gps->sacc / req_sacc));
+
+    // Calculate time lapsed since last update, limit to prevent numerical errors and calculate a lowpass filter coefficient
+    const float filt_time_const = 10.0f;
+    float dt = fminf(fmaxf(float(time_last_imu_ - gps_pos_prev_.timestamp) * 1e-6f, 0.001f), filt_time_const);
+    float filter_coef = dt / filt_time_const;
+
+    // The following checks are only valid when the vehicle is at rest
+    double lat = gps->lat * 1.0e-7;
+    double lon = gps->lon * 1.0e-7;
+    if (!in_air_ && vehicle_at_rest_) {
+      // Calculate position movement since last measurement
+      float delta_posN = 0.0f;
+      float delta_PosE = 0.0f;
+
+      // calculate position movement since last GPS fix
+      if (gps_pos_prev_.timestamp > 0) {
+        map_projection_project(&gps_pos_prev_, lat, lon, &delta_posN, &delta_PosE);
+      } else {
+        // no previous position has been set
+        map_projection_init_timestamped(&gps_pos_prev_, lat, lon, time_last_imu_);
+        gps_alt_prev_ = 1e-3f * (float)gps->alt;
+      }
+
+      // Calculate the horizontal drift velocity components and limit to 10x the threshold
+      float vel_limit = 10.0f * req_hdrift;
+      float velN = fminf(fmaxf(delta_posN / dt, -vel_limit), vel_limit);
+      float velE = fminf(fmaxf(delta_PosE / dt, -vel_limit), vel_limit);
+
+      // Apply a low pass filter
+      gpsDriftVelN_ = velN * filter_coef + gpsDriftVelN_ * (1.0f - filter_coef);
+      gpsDriftVelE_ = velE * filter_coef + gpsDriftVelE_ * (1.0f - filter_coef);
+
+      // Calculate the horizontal drift speed and fail if too high
+      gps_drift_metrics_[0] = sqrtf(gpsDriftVelN_ * gpsDriftVelN_ + gpsDriftVelE_ * gpsDriftVelE_);
+      gps_check_fail_status_.flags.hdrift = (gps_drift_metrics_[0] > req_hdrift);
+
+      // Calculate the vertical drift velocity and limit to 10x the threshold
+      float vz_drift_limit = 10.0f * req_vdrift;
+      float gps_alt_m = 1e-3f * (float)gps->alt;
+      float velD = constrain(((gps_alt_prev_ - gps_alt_m) / dt), -vz_drift_limit, vz_drift_limit);
+
+      // Apply a low pass filter to the vertical velocity
+      gps_drift_velD_ = velD * filter_coef + gps_drift_velD_ * (1.0f - filter_coef);
+
+      // Fail if the vertical drift speed is too high
+      gps_drift_metrics_[1] = fabsf(gps_drift_velD_);
+      gps_check_fail_status_.flags.vdrift = (gps_drift_metrics_[1] > req_vdrift);
+
+      // Check the magnitude of the filtered horizontal GPS velocity
+      float vxy_drift_limit = 10.0f * req_hdrift;
+      float gps_velN = fminf(fmaxf(gps->vel_ned[0], -vxy_drift_limit), vxy_drift_limit);
+      float gps_velE = fminf(fmaxf(gps->vel_ned[1], -vxy_drift_limit), vxy_drift_limit);
+      gps_velN_filt_ = gps_velN * filter_coef + gps_velN_filt_ * (1.0f - filter_coef);
+      gps_velE_filt_ = gps_velE * filter_coef + gps_velE_filt_ * (1.0f - filter_coef);
+      gps_drift_metrics_[2] = sqrtf(gps_velN_filt_ * gps_velN_filt_ + gps_velE_filt_ * gps_velE_filt_);
+      gps_check_fail_status_.flags.hspeed = (gps_drift_metrics_[2] > req_hdrift);
+
+      gps_drift_updated_ = true;
+    } else if (in_air_) {
+      // These checks are always declared as passed when flying
+      // If on ground and moving, the last result before movemenent commenced is kept
+      gps_check_fail_status_.flags.hdrift = false;
+      gps_check_fail_status_.flags.vdrift = false;
+      gps_check_fail_status_.flags.hspeed = false;
+      gps_drift_updated_ = false;
+    } else {
+      // This is the case where the vehicle is on ground and IMU movement is blocking the drift calculation
+      gps_drift_updated_ = true;
+    }
+
+    // save GPS fix for next time
+    map_projection_init_timestamped(&gps_pos_prev_, lat, lon, time_last_imu_);
+    gps_alt_prev_ = 1e-3f * (float)gps->alt;
+
+    // Check  the filtered difference between GPS and EKF vertical velocity
+    float vz_diff_limit = 10.0f * req_vdrift;
+    float vertVel = fminf(fmaxf((gps->vel_ned[2] - state_.vel(2)), -vz_diff_limit), vz_diff_limit);
+    gps_velD_diff_filt_ = vertVel * filter_coef + gps_velD_diff_filt_ * (1.0f - filter_coef);
+    gps_check_fail_status_.flags.vspeed = (fabsf(gps_velD_diff_filt_) > req_vdrift);
+
+    // assume failed first time through
+    if (last_gps_fail_us_ == 0) {
+      last_gps_fail_us_ = time_last_imu_;
+    }
+
+    // if any user selected checks have failed, record the fail time
+    if (
+      gps_check_fail_status_.flags.fix ||
+      (gps_check_fail_status_.flags.nsats  && (gps_check_mask & MASK_GPS_NSATS)) ||
+      (gps_check_fail_status_.flags.gdop   && (gps_check_mask & MASK_GPS_GDOP)) ||
+      (gps_check_fail_status_.flags.hacc   && (gps_check_mask & MASK_GPS_HACC)) ||
+      (gps_check_fail_status_.flags.vacc   && (gps_check_mask & MASK_GPS_VACC)) ||
+      (gps_check_fail_status_.flags.sacc    && (gps_check_mask & MASK_GPS_SACC)) ||
+      (gps_check_fail_status_.flags.hdrift  && (gps_check_mask & MASK_GPS_HDRIFT)) ||
+      (gps_check_fail_status_.flags.vdrift  && (gps_check_mask & MASK_GPS_VDRIFT)) ||
+      (gps_check_fail_status_.flags.hspeed  && (gps_check_mask & MASK_GPS_HSPD)) ||
+      (gps_check_fail_status_.flags.vspeed  && (gps_check_mask & MASK_GPS_VSPD))
+    ) {
+      last_gps_fail_us_ = time_last_imu_;
+    } else {
+      last_gps_pass_us_ = time_last_imu_;
+    }
+
+    // continuous period without fail of 10 seconds required to return a healthy status
+    return (time_last_imu_ - last_gps_fail_us_ > (uint64_t)1e7);
   }
 } //  namespace eskf
