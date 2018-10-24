@@ -135,7 +135,6 @@ namespace eskf {
     unsigned min_obs_interval_us_ {0}; // minimum time interval between observations that will guarantee data is not lost (usec)
 
     ///< filter initialisation
-    vec3 delVel_sum_; 		///< summed delta velocity (m/sec)
     bool NED_origin_initialised_; ///< true when the NED origin has been initialised
     bool terrain_initialised_;	///< true when the terrain estimator has been intialised
     bool filter_initialised_;	///< true when the filter has been initialised

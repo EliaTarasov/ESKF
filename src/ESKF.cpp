@@ -70,7 +70,6 @@ namespace eskf {
     NED_origin_initialised_ = false;
     filter_initialised_ = false;
     terrain_initialised_ = false;
-    delVel_sum_ = vec3(0, 0, 0);
 
     imu_updated_ = false;
     memset(vel_pos_innov_, 0, 6*sizeof(scalar_t));
@@ -116,11 +115,12 @@ namespace eskf {
     scalar_t roll = 0.0;
     scalar_t yaw = 0.0;
     imuSample imu_init = imu_buffer_.get_newest();
-    delVel_sum_ += imu_init.delta_vel;
-    if (delVel_sum_.norm() > 0.001) {
-      delVel_sum_.normalize();
-      pitch = asin(delVel_sum_(0));
-      roll = atan2(-delVel_sum_(1), -delVel_sum_(2));
+    static vec3 delVel_sum(0, 0, 0); ///< summed delta velocity (m/sec)
+    delVel_sum += imu_init.delta_vel;
+    if (delVel_sum.norm() > 0.001) {
+      delVel_sum.normalize();
+      pitch = asin(delVel_sum(0));
+      roll = atan2(-delVel_sum(1), -delVel_sum(2));
     } else {
       return false;
     }
