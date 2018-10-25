@@ -3,7 +3,6 @@
 
 #include <ignition/math.hh>
 #include <common.h>
-#include <geo.h>
 #include <RingBuffer.hpp>
 
 namespace eskf {
@@ -57,8 +56,6 @@ namespace eskf {
     void controlHeightSensorTimeouts();
     bool calcOptFlowBodyRateComp();
     bool collect_imu(imuSample& imu);
-    bool collect_gps(uint64_t time_usec, gps_message *gps);
-    bool gps_is_good(gps_message *gps);
 
     ///< state vector
     state state_;
@@ -101,11 +98,9 @@ namespace eskf {
     uint64_t time_last_range_ {0};
     uint64_t time_last_fake_gps_ {0};
     uint64_t time_last_hagl_fuse_{0};		///< last system time that the hagl measurement failed it's checks (uSec)
-    uint64_t last_gps_fail_us_{0};		///< last system time in usec that the GPS failed it's checks
-    uint64_t last_gps_pass_us_{0};		///< last system time in usec that the GPS passed it's checks
-    uint64_t last_gps_origin_time_us_{0};	///< time the origin was last set (uSec)
 
     ///< sensors delays
+    scalar_t gps_delay_ms_ {110.0f};		///< gps measurement delay relative to the IMU (mSec)
     scalar_t ev_delay_ms_ {100.0f};		///< off-board vision measurement delay relative to the IMU (mSec)
     scalar_t flow_delay_ms_ {5.0f};		///< optical flow measurement delay relative to the IMU (mSec) - this is to the middle of the optical flow integration interval
     scalar_t range_delay_ms_{5.0f};		///< range finder measurement delay relative to the IMU (mSec)
@@ -113,7 +108,7 @@ namespace eskf {
     ///< frames rotations
     mat3 R_to_earth_;  ///< Rotation (DCM) from FRD to NED
     /**
-      * @brief Quaternion for rotation between ENU and NED frames
+      * Quaternion for rotation between ENU and NED frames
       *
       * NED to ENU: +PI/2 rotation about Z (Down) followed by a +PI rotation around X (old North/new East)
       * ENU to NED: +PI/2 rotation about Z (Up) followed by a +PI rotation about X (old East/new North)
@@ -121,7 +116,7 @@ namespace eskf {
     const ignition::math::Quaterniond q_ng = ignition::math::Quaterniond(0, 0.70711, 0.70711, 0);
 
     /**
-      * @brief Quaternion for rotation between body FLU and body FRD frames
+      * Quaternion for rotation between body FLU and body FRD frames
       *
       * +PI rotation around X (Forward) axis rotates from Forward, Right, Down (aircraft)
       * to Forward, Left, Up (base_link) frames and vice-versa.
@@ -147,8 +142,8 @@ namespace eskf {
     const scalar_t accel_bias_p_noise_ {3.0e-3};	///< process noise for IMU accelerometer bias prediction (m/sec**3)
 
     // input noise
-    scalar_t gyro_noise_ {1.5e-2};	///< IMU angular rate noise used for covariance prediction (rad/sec)
-    scalar_t accel_noise_ {3.5e-1};	///< IMU acceleration noise use for covariance prediction (m/sec**2)
+    const scalar_t gyro_noise_ {1.5e-2};	///< IMU angular rate noise used for covariance prediction (rad/sec)
+    const scalar_t accel_noise_ {3.5e-1};	///< IMU acceleration noise use for covariance prediction (m/sec**2)
 
     ///< Measurement (observation) noise
     const scalar_t range_noise_{0.1f};		///< observation noise for range finder measurements (m)
@@ -197,12 +192,12 @@ namespace eskf {
     scalar_t vel_pos_test_ratio_[6] {};  // velocity and position innovation consistency check ratios
 
     ///< range specific params
-    scalar_t rng_gnd_clearance_{0.1f};		///< minimum valid value for range when on ground (m)
-    scalar_t rng_sens_pitch_{0.0f};		///< Pitch offset of the range sensor (rad). Sensor points out along Z axis when offset is zero. Positive rotation is RH about Y axis.
+    const scalar_t rng_gnd_clearance_{0.1f};		///< minimum valid value for range when on ground (m)
+    const scalar_t rng_sens_pitch_{0.0f};		///< Pitch offset of the range sensor (rad). Sensor points out along Z axis when offset is zero. Positive rotation is RH about Y axis.
     scalar_t range_noise_scaler_{0.0f};		///< scaling from range measurement to noise (m/m)
     scalar_t vehicle_variance_scaler_{0.0f};	///< gain applied to vehicle height variance used in calculation of height above ground observation variance
-    scalar_t max_hagl_for_range_aid_{5.0f};	///< maximum height above ground for which we allow to use the range finder as height source (if range_aid == 1)
-    scalar_t max_vel_for_range_aid_{1.0f};	///< maximum ground velocity for which we allow to use the range finder as height source (if range_aid == 1)
+    const scalar_t max_hagl_for_range_aid_{5.0f};	///< maximum height above ground for which we allow to use the range finder as height source (if range_aid == 1)
+    const scalar_t max_vel_for_range_aid_{1.0f};	///< maximum ground velocity for which we allow to use the range finder as height source (if range_aid == 1)
     int32_t range_aid_{0};			///< allow switching primary height source to range finder if certian conditions are met
     const scalar_t range_cos_max_tilt_{0.7071f};	///< cosine of the maximum tilt angle from the vertical that permits use of range finder data
     scalar_t terrain_gradient_{0.5f};		///< gradient of terrain used to estimate process noise due to changing position (m/m)
@@ -222,12 +217,12 @@ namespace eskf {
     scalar_t delta_time_of_{0.0f};	///< time in sec that _imu_del_ang_of was accumulated over (sec)
 
     bool imu_updated_;
+    vec3 last_known_posNED_;
 
     static constexpr scalar_t kOneG = 9.80665;  /// Earth gravity (m/s^2)
     static constexpr scalar_t acc_bias_lim = 0.4; ///< maximum accel bias magnitude (m/sec**2)
     static constexpr scalar_t hgt_reset_lim = 0.0f; ///< 
-    static constexpr scalar_t gndclearance = 0.1f;
-    
+
     bool mag_use_inhibit_{false};		///< true when magnetomer use is being inhibited
     bool mag_use_inhibit_prev_{false};		///< true when magnetomer use was being inhibited the previous frame
     scalar_t last_static_yaw_{0.0f};		///< last yaw angle recorded when on ground motion checks were passing (rad)
@@ -256,44 +251,6 @@ namespace eskf {
     bool in_air_ = false;
     bool vehicle_at_rest_ = !in_air_; // true when the vehicle is at rest
     bool vehicle_at_rest_prev_ {false}; ///< true when the vehicle was at rest the previous time the status was checked
-    
-    vec3 last_known_posNED_;
-    
-    gps_check_fail_status_u gps_check_fail_status_{};
-    struct map_projection_reference_s pos_ref_ {};   // Contains WGS-84 position latitude and longitude (radians) of the EKF origin
-    struct map_projection_reference_s gps_pos_prev_ {};   // Contains WGS-84 position latitude and longitude (radians) of the previous GPS message
-    scalar_t gps_alt_prev_ {0.0f};	// height from the previous GPS message (m)
-
-    // variables used for the GPS quality checks
-    scalar_t gpsDriftVelN_{0.0f};		///< GPS north position derivative (m/sec)
-    scalar_t gpsDriftVelE_{0.0f};		///< GPS east position derivative (m/sec)
-    scalar_t gps_drift_velD_{0.0f};		///< GPS down position derivative (m/sec)
-    scalar_t gps_velD_diff_filt_{0.0f};	///< GPS filtered Down velocity (m/sec)
-    scalar_t gps_velN_filt_{0.0f};		///< GPS filtered North velocity (m/sec)
-    scalar_t gps_velE_filt_{0.0f};		///< GPS filtered East velocity (m/sec)
-    
-    scalar_t gps_error_norm_{1.0f};		///< normalised gps error
-
-    // Variables used to publish the WGS-84 location of the EKF local NED origin
-   
-    scalar_t gps_alt_ref_{0.0f};		///< WGS-84 height (m)
-    scalar_t gps_drift_metrics_[3] {};	// Array containing GPS drift metrics
-                                 // [0] Horizontal position drift rate (m/s)
-                                 // [1] Vertical position drift rate (m/s)
-                                 // [2] Filtered horizontal velocity (m/s)
-
-    int req_nsats = 8;
-    scalar_t req_gdop = 2.5;
-    scalar_t req_hacc = 3;
-    scalar_t req_vacc = 5;
-    scalar_t req_sacc = 0.5;
-    scalar_t req_hdrift = 0.1;
-    scalar_t req_vdrift = 0.2;
-
-    scalar_t gps_origin_eph_{0.0f}; // horizontal position uncertainty of the GPS origin
-    scalar_t gps_origin_epv_{0.0f}; // vertical position uncertainty of the GPS origin
-    
-    bool gps_drift_updated_ = false;
   };
 }
 

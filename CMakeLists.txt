@@ -8,7 +8,6 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   eigen_conversions
   mavros_msgs
-  mavros
   gazebo
 )
 
@@ -18,11 +17,6 @@ find_package(Eigen REQUIRED)
 catkin_package(
   CATKIN_DEPENDS message_runtime
 )
-
-# include boost
-find_package(Boost REQUIRED)
-link_directories(${Boost_LIBRARY_DIR})
-include_directories(${Boost_INCLUDE_DIR})
 
 # include headers
 include_directories(
@@ -39,16 +33,10 @@ add_library(ESKF
   src/ESKF.cpp
 )
 
-add_library(geo
-  src/geo.cpp
-)
-
 set(RELEVANT_LIBRARIES
   ESKF
   ${catkin_LIBRARIES}
   ${mavros_LIBRARIES}
-  ${GAZEBO_LIBRARIES}
-  geo
 )
 
 # rigorous error checking
