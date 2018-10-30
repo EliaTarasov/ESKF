@@ -153,7 +153,6 @@ namespace eskf {
     const scalar_t pos_noaid_noise_ {10.0f};	///< observation noise for non-aiding position fusion (m)
     const scalar_t vel_noise_ {0.5f};		///< minimum allowed observation noise for velocity fusion (m/sec)
     const scalar_t pos_noise_ {0.5f};		///< minimum allowed observation noise for position fusion (m)
-    const scalar_t baro_noise_ {2.0f};		///< observation noise for barometric height fusion (m)
     const scalar_t terrain_p_noise_{5.0f};	///< process noise for terrain offset (m/sec)
     scalar_t posObsNoiseNE_ {0.0f};	///< 1-STD observtion noise used for the fusion of NE position data (m)
     
@@ -183,8 +182,8 @@ namespace eskf {
     scalar_t vel_pos_innov_[6] {};	///< velocity and position innovations: (m/s and m)
 
     ///< innovation variances
-    scalar_t hagl_innov_var_{0.0f};		///< innovation variance for the last height above terrain measurement (m**2)
-    scalar_t vel_pos_innov_var_[6] {};	///< ROS velocity and position innovation variances: (m**2)
+    scalar_t hagl_innov_var_{0.0f};	///< innovation variance for the last height above terrain measurement (m**2)
+    scalar_t vel_pos_innov_var_[6] {};	///< velocity and position innovation variances: (m**2)
     scalar_t flow_innov_var_[2] {};	///< flow innovation variance ((rad/sec)**2)
 
     ///< test ratios

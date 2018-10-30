@@ -102,7 +102,7 @@ namespace eskf {
     // position
     P_[7][7] = sq(fmaxf(pos_noise_, 0.01f));
     P_[8][8] = P_[7][7];
-    P_[9][9] = sq(fmaxf(baro_noise_, 0.01f));
+    P_[9][9] = sq(fmaxf(range_noise_, 0.01f));
 
     // gyro bias
     P_[10][10] = sq(switch_on_gyro_bias_ * dt);
