@@ -1469,7 +1469,7 @@ namespace eskf {
       R[4] = R[3];
       gate_size[4] = gate_size[3];
     }
-    
+
     if (fuse_height_) {
       if(ev_hgt_) {
         fuse_map[5] = true;
@@ -1512,13 +1512,13 @@ namespace eskf {
         vel_pos_test_ratio_[obs_index] = sq(vel_pos_innov_[obs_index]) / (sq(gate_size[obs_index]) * vel_pos_innov_var_[obs_index]);
       }
     }
-    
+
     // check position, velocity and height innovations
     // treat 2D position and height as separate sensors
     bool pos_check_pass = ((vel_pos_test_ratio_[3] <= 1.0f) && (vel_pos_test_ratio_[4] <= 1.0f));
     innov_check_pass_map[3] = innov_check_pass_map[4] = pos_check_pass;
     innov_check_pass_map[5] = (vel_pos_test_ratio_[5] <= 1.0f);
-    
+
     for (unsigned obs_index = 0; obs_index < 6; obs_index++) {
       // skip fusion if not requested or checks have failed
       if (!fuse_map[obs_index] || !innov_check_pass_map[obs_index]) {
@@ -1553,7 +1553,7 @@ namespace eskf {
           healthy = false;
         } 
       }
-      
+
       // only apply covariance and state corrrections if healthy
       if (healthy) {
         // apply the covariance corrections
@@ -1571,14 +1571,10 @@ namespace eskf {
       }
     }
   }
-  
+
   void ESKF::updateVision(const quat& q, const vec3& p, uint64_t time_usec, scalar_t dt) {
     // transform orientation from (ENU2FLU) to (NED2FRD):
-    const mat3 R_NED2ENU = q_NED2ENU.toRotationMatrix();
-    mat3 R_ENU2FLU = q.toRotationMatrix();
-    const mat3 R_FLU2FRD = q_FLU2FRD.toRotationMatrix();
-    mat3 R_NED2FRD = R_NED2ENU * R_ENU2FLU * R_FLU2FRD;
-    quat q_nb(R_NED2FRD);
+    quat q_nb = q_NED2ENU * q * q_FLU2FRD;
 
     // transform position from local ENU to local NED frame
     vec3 pos_nb = q_NED2ENU.inverse().toRotationMatrix() * p;
