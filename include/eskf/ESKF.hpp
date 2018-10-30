@@ -1,7 +1,6 @@
 #ifndef ESKF_H_
 #define ESKF_H_
 
-#include <ignition/math.hh>
 #include <common.h>
 #include <RingBuffer.hpp>
 
@@ -107,21 +106,22 @@ namespace eskf {
 
     ///< frames rotations
     mat3 R_to_earth_;  ///< Rotation (DCM) from FRD to NED
+
     /**
       * Quaternion for rotation between ENU and NED frames
       *
       * NED to ENU: +PI/2 rotation about Z (Down) followed by a +PI rotation around X (old North/new East)
       * ENU to NED: +PI/2 rotation about Z (Up) followed by a +PI rotation about X (old East/new North)
       */
-    const ignition::math::Quaterniond q_ng = ignition::math::Quaterniond(0, 0.70711, 0.70711, 0);
+    const quat q_NED2ENU = quat(0, 0.70711, 0.70711, 0);
 
     /**
       * Quaternion for rotation between body FLU and body FRD frames
       *
-      * +PI rotation around X (Forward) axis rotates from Forward, Right, Down (aircraft)
-      * to Forward, Left, Up (base_link) frames and vice-versa.
+      * FLU to FRD: +PI rotation about X(forward)
+      * FRD to FLU: -PI rotation about X(forward)
       */
-    const ignition::math::Quaterniond q_br = ignition::math::Quaterniond(0, 1, 0, 0);
+    const quat q_FLU2FRD = quat(0, 1, 0, 0);
 
     ///< filter times
     const unsigned FILTER_UPDATE_PERIOD_MS = 12;	///< ekf prediction period in milliseconds - this should ideally be an integer multiple of the IMU time delta

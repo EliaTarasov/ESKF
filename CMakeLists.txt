@@ -8,7 +8,6 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   eigen_conversions
   mavros_msgs
-  gazebo
 )
 
 find_package(cmake_modules)
@@ -23,7 +22,6 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   ${mavros_INCLUDE_DIRS}
-  ${GAZEBO_INCLUDE_DIRS}
   include
   include/eskf
 )

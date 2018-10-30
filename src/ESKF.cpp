@@ -195,18 +195,11 @@ namespace eskf {
   
   void ESKF::run(const vec3 &w, const vec3 &a, uint64_t time_us, scalar_t dt) {
     // convert FLU to FRD body frame IMU data
+    vec3 gyro_b = q_FLU2FRD.toRotationMatrix() * w;
+    vec3 accel_b = q_FLU2FRD.toRotationMatrix() * a;
 
-    ignition::math::Vector3d gyro_b = q_br.RotateVector(ignition::math::Vector3d(
-      w.x(),
-      w.y(),
-      w.z()));
-    ignition::math::Vector3d accel_b = q_br.RotateVector(ignition::math::Vector3d(
-      a.x(),
-      a.y(),
-      a.z()));
-    
-    vec3 delta_ang = vec3(gyro_b.X(), gyro_b.Y(), gyro_b.Z()) * dt; // current delta angle  (rad)
-    vec3 delta_vel = vec3(accel_b.X(), accel_b.Y(), accel_b.Z()) * dt; //current delta velocity (m/s)
+    vec3 delta_ang = vec3(gyro_b.x(), gyro_b.y(), gyro_b.z()) * dt; // current delta angle  (rad)
+    vec3 delta_vel = vec3(accel_b.x(), accel_b.y(), accel_b.z()) * dt; //current delta velocity (m/s)
 
     // copy data
     imuSample imu_sample_new = {};
@@ -1580,31 +1573,16 @@ namespace eskf {
   }
   
   void ESKF::updateVision(const quat& q, const vec3& p, uint64_t time_usec, scalar_t dt) {
-    // q_gr is the quaternion that represents a rotation from ENU earth/local
-    // frame to XYZ body FLU frame
-    ignition::math::Quaterniond q_gr = ignition::math::Quaterniond(
-      q.w(),
-      q.x(),
-      q.y(),
-      q.z());
+    // transform orientation from (ENU2FLU) to (NED2FRD):
+    const mat3 R_NED2ENU = q_NED2ENU.toRotationMatrix();
+    mat3 R_ENU2FLU = q.toRotationMatrix();
+    const mat3 R_FLU2FRD = q_FLU2FRD.toRotationMatrix();
+    mat3 R_NED2FRD = R_NED2ENU * R_ENU2FLU * R_FLU2FRD;
+    quat q_nb(R_NED2FRD);
 
-    // transform orientation from local ENU to body FLU frame
-    ignition::math::Quaterniond q_gb = q_gr * q_br.Inverse();
-    // transform orientation from body FLU to body FRD frame:
-    // q_nb is the quaternion that represents a rotation from NED earth/local
-    // frame to XYZ body FRD frame
-    ignition::math::Quaterniond orientation = q_ng * q_gb;
-    
-    quat q_nb = quat(orientation.W(), orientation.X(), orientation.Y(), orientation.Z());
-    
     // transform position from local ENU to local NED frame
-    ignition::math::Vector3d position = q_ng.RotateVector(ignition::math::Vector3d(
-      p.x(),
-      p.y(),
-      p.z()));
-    
-    vec3 pos_nb = vec3(position.X(), position.Y(), position.Z());
-    
+    vec3 pos_nb = q_NED2ENU.inverse().toRotationMatrix() * p;
+
     // limit data rate to prevent data being lost
     if (time_usec - time_last_ext_vision_ > min_obs_interval_us_) {
       extVisionSample ev_sample_new;
@@ -1620,24 +1598,14 @@ namespace eskf {
       ext_vision_buffer_.push(ev_sample_new);
     }
   }
-  
+
   void ESKF::updateGps(const vec3& v, const vec3& p, uint64_t time_us, scalar_t dt) {
     // transform linear velocity from local ENU to body FRD frame
-    ignition::math::Vector3d velocity = q_ng.RotateVector(
-    q_br.RotateVector(ignition::math::Vector3d(
-      v.x(),
-      v.y(),
-      v.z())));
+    vec3 vel_nb = q_NED2ENU.inverse().toRotationMatrix() * v;
 
     // transform position from local ENU to local NED frame
-    ignition::math::Vector3d position = q_ng.RotateVector(ignition::math::Vector3d(
-      p.x(),
-      p.y(),
-      p.z()));
-    
-    vec3 pos_nb = vec3(position.X(), position.Y(), position.Z());
-    vec3 vel_nb = vec3(velocity.X(), velocity.Y(), velocity.Z());
-    
+    vec3 pos_nb = q_NED2ENU.inverse().toRotationMatrix() * p;
+
     // check for arrival of new sensor data at the fusion time horizon
     if (time_us - time_last_gps_ > min_obs_interval_us_) {
       gpsSample gps_sample_new;
@@ -1660,18 +1628,17 @@ namespace eskf {
   }
 
   void ESKF::updateOpticalFlow(const vec2& int_xy, const vec2& int_xy_gyro, uint32_t integration_time_us, scalar_t distance, uint8_t quality, uint64_t time_us, scalar_t dt) {
-    
     // convert integrated flow and integrated gyro from flu to frd
     ///< integrated flow in PX4 Body (FRD) coordinates
     ///< integrated gyro in PX4 Body (FRD) coordinates
     vec2 int_xy_b;
     vec2 int_xy_gyro_b;
-    
+
     int_xy_b(0) = int_xy(0);
     int_xy_b(1) = -int_xy(1);
-    
+
     int_xy_gyro_b = vec2(0,0); //replace embedded camera gyro to imu gyro
-    
+
     // check for arrival of new sensor data at the fusion time horizon
     if (time_us - time_last_opt_flow_ > min_obs_interval_us_) {
       // check if enough integration time and fail if integration time is less than 50% of min arrival interval because too much data is being lost
@@ -1726,7 +1693,7 @@ namespace eskf {
       }
     }
   }
-  
+
   void ESKF::updateLandedState(uint8_t landed_state) {
     in_air_ = landed_state;
   }
@@ -1761,10 +1728,10 @@ namespace eskf {
     scalar_t q1 = state_.quat_nominal.x();
     scalar_t q2 = state_.quat_nominal.y();
     scalar_t q3 = state_.quat_nominal.z();
-    
+
     scalar_t predicted_hdg, measured_hdg;
     scalar_t H_YAW[4];
-    
+
     // determine if a 321 or 312 Euler sequence is best
     if (fabsf(R_to_earth_(2, 0)) < fabsf(R_to_earth_(2, 1))) {
       // calculate observation jacobian when we are observing the first rotation in a 321 sequence
@@ -1847,7 +1814,7 @@ namespace eskf {
       scalar_t Tbn_1_1 = sq(ev_sample_delayed_.quatNED.w()) - sq(ev_sample_delayed_.quatNED.x()) + sq(ev_sample_delayed_.quatNED.y()) - sq(ev_sample_delayed_.quatNED.z());
       measured_hdg = atan2f(Tbn_0_1_neg, Tbn_1_1);
     }
-    
+
     scalar_t R_YAW = sq(fmaxf(ev_sample_delayed_.angErr, 1.0e-2f));
     // Calculate innovation variance and Kalman gains, taking advantage of the fact that only the first 3 elements in H are non zero
     // calculate the innovaton variance
@@ -1912,13 +1879,13 @@ namespace eskf {
       last_static_yaw_ = predicted_hdg;
     }
     mag_use_inhibit_prev_ = mag_use_inhibit_;
-    
+
     // wrap the innovation to the interval between +-pi
     heading_innov_ = wrap_pi(heading_innov_);
-    
+
     // innovation test ratio
     scalar_t yaw_test_ratio = sq(heading_innov_) / (sq(heading_innov_gate_) * heading_innov_var);
-	  
+
     // set the vision yaw unhealthy if the test fails
     if (yaw_test_ratio > 1.0f) {
       if(in_air_)
