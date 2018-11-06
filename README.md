@@ -15,5 +15,5 @@ Steps:
 2. Run `catkin_make`
 3. Edit launch file `launch/eskf.launch` according to topics you want to subscribe.
 4. Run ROS node which provides subscribed topics.
-5. Run `roslaunch eskf eskf.launch` to
+5. Run `roslaunch eskf eskf.launch` to start eskf node.
 6. Run `echo /eskf/pose` to display results.
