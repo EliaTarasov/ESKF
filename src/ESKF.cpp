@@ -2017,12 +2017,14 @@ namespace eskf {
     }
   }
 
-  quat ESKF::getQuat() { 
-    return state_.quat_nominal; 
+  quat ESKF::getQuat() {
+    // transform orientation from (NED2FRD) to (ENU2FLU)
+    return q_NED2ENU.conjugate() * state_.quat_nominal * q_FLU2FRD.conjugate(); 
   }
 
   vec3 ESKF::getXYZ() {
-    return state_.pos;
+    // transform position from local NED to local ENU frame
+    return q_NED2ENU.toRotationMatrix() * state_.pos;
   }
 
   // initialise the quaternion covariances using rotation vector variances
