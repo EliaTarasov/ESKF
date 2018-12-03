@@ -1,5 +1,4 @@
 #include <eskf/Node.hpp>
-#include <geometry_msgs/Vector3Stamped.h>
 
 namespace eskf
 {
@@ -29,7 +28,7 @@ Node::Node(const ros::NodeHandle &nh, const ros::NodeHandle &pnh) : nh_(pnh), in
 
   eskf_.setFusionMask(fusion_mask);
 
-  pubPose_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("pose", 1);
+  pubPose_ = nh_.advertise<nav_msgs::Odometry>("pose", 1);
 
   int publish_rate = default_publish_rate_;
   ros::param::get("~publish_rate", publish_rate);
@@ -103,6 +102,7 @@ void Node::publishState(const ros::TimerEvent&) {
   // get kalman filter result
   const quat e2g = eskf_.getQuat();
   const vec3 position = eskf_.getPosition();
+  const vec3 velocity = eskf_.getVelocity();
 
   static size_t trace_id_ = 0;
   std_msgs::Header header;
@@ -110,27 +110,20 @@ void Node::publishState(const ros::TimerEvent&) {
   header.seq = trace_id_++;
   header.stamp = ros::Time::now();
 
-  // x-y-z (m)
-  geometry_msgs::Vector3Stamped xyz;
-  xyz.header = header;
-  xyz.vector.x = position[0];
-  xyz.vector.y = position[1];
-  xyz.vector.z = position[2];
+  nav_msgs::Odometry odom;
+  odom.header = header;
+  odom.pose.pose.position.x = position[0];
+  odom.pose.pose.position.y = position[1];
+  odom.pose.pose.position.z = position[2];
+  odom.twist.twist.linear.x = velocity[0];
+  odom.twist.twist.linear.x = velocity[1];
+  odom.twist.twist.linear.x = velocity[2];
+  odom.pose.pose.orientation.w = e2g.w();
+  odom.pose.pose.orientation.x = e2g.x();
+  odom.pose.pose.orientation.y = e2g.y();
+  odom.pose.pose.orientation.z = e2g.z();
 
-  geometry_msgs::PoseWithCovarianceStamped pose;
-  pose.header = header;
-  pose.pose.pose.position.x = position[0];
-  pose.pose.pose.position.y = position[1];
-  pose.pose.pose.position.z = position[2];
-  pose.pose.pose.orientation.w = e2g.w();
-  pose.pose.pose.orientation.x = e2g.x();
-  pose.pose.pose.orientation.y = e2g.y();
-  pose.pose.pose.orientation.z = e2g.z();
-
-  //px4 doesn't use covariance for vision so set it up to zero 
-  for(size_t i = 0; i < 36; ++i)
-    pose.pose.covariance[i] = 0;
-  pubPose_.publish(pose);
+  pubPose_.publish(odom);
 }
 
 }
