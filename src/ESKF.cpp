@@ -2022,9 +2022,14 @@ namespace eskf {
     return q_NED2ENU.conjugate() * state_.quat_nominal * q_FLU2FRD.conjugate(); 
   }
 
-  vec3 ESKF::getXYZ() {
+  vec3 ESKF::getPosition() {
     // transform position from local NED to local ENU frame
     return q_NED2ENU.toRotationMatrix() * state_.pos;
+  }
+
+  vec3 ESKF::getVelocity() {
+    // transform velocity from local NED to local ENU frame
+    return q_NED2ENU.toRotationMatrix() * state_.vel;
   }
 
   // initialise the quaternion covariances using rotation vector variances

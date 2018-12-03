@@ -22,7 +22,8 @@ namespace eskf {
     void updateLandedState(uint8_t landed_state);
 
     quat getQuat();
-    vec3 getXYZ();
+    vec3 getPosition();
+    vec3 getVelocity();
 
   private:
 

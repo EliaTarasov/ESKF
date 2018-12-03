@@ -102,7 +102,7 @@ void Node::publishState(const ros::TimerEvent&) {
 
   // get kalman filter result
   const quat e2g = eskf_.getQuat();
-  const vec3 position = eskf_.getXYZ();
+  const vec3 position = eskf_.getPosition();
 
   static size_t trace_id_ = 0;
   std_msgs::Header header;
