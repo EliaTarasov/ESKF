@@ -5,6 +5,9 @@
   <!-- IMU topic to use -->
   <arg name="imu_topic" default="/mavros/imu/data_raw"/>
 
+  <!-- MAG topic to use -->
+  <arg name="mag_topic" default="/mavros/imu/mag"/>
+
   <!-- VISION topic to use -->
   <arg name="vision_topic" default="/svo/pose"/>
 
@@ -16,15 +19,16 @@
 
   <!-- EXTENDED STATE topic to use -->
   <arg name="extended_state_topic" default="/mavros/extended_state"/>
-  
+
   <node pkg="eskf" name="$(arg eskf_node)" type="eskf" output="screen">
     <remap from="~imu" to="$(arg imu_topic)"/>
     <remap from="~vision" to="$(arg vision_topic)"/>
     <remap from="~gps" to="$(arg gps_topic)"/>
     <remap from="~optical_flow" to="$(arg optical_flow_topic)"/>
+    <remap from="~mag" to="$(arg mag_topic)"/>
     <remap from="~extended_state" to="$(arg extended_state_topic)"/>
-    
-    <param name="fusion_mask" value="448"  type="int"/>
+
+    <param name="fusion_mask" value="568"  type="int"/>
     <!-- 
      1 - vision position. 
      2 - vision yaw. 
@@ -32,11 +36,12 @@
      8 - gps position. 
      16 - gps velocity
      32 - gps height.
-     64 - mag yaw. 
+     64 - mag inhibit. 
      128 - optical flow. 
      256 - lidar height.
+     512 - mag heading.
      -->
-     
+
      <param name="publish_rate" value="10" type="int"/>
   </node>
 

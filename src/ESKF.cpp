@@ -16,6 +16,8 @@ namespace eskf {
     state_.pos = vec3(0, 0, 0);
     state_.gyro_bias = vec3(0, 0, 0);
     state_.accel_bias = vec3(0, 0, 0);
+    state_.mag_I.setZero();
+    state_.mag_B.setZero();
 
     //  zeros P_
     for (unsigned i = 0; i < k_num_states_; i++) {
@@ -64,6 +66,12 @@ namespace eskf {
       range_buffer_.push(range_sample_init);
     }
 
+    mag_buffer_.allocate(obs_buffer_length_);
+    for (int index = 0; index < obs_buffer_length_; index++) {
+      magSample mag_sample_init = {};
+      mag_buffer_.push(mag_sample_init);
+    }
+
     dt_ekf_avg_ = 0.001f * (scalar_t)(FILTER_UPDATE_PERIOD_MS);
 
     ///< filter initialisation
@@ -108,6 +116,17 @@ namespace eskf {
     P_[10][10] = sq(switch_on_gyro_bias_ * dt);
     P_[11][11] = P_[10][10];
     P_[12][12] = P_[10][10];
+
+    P_[13][13] = sq(switch_on_accel_bias_ * dt);
+    P_[14][14] = P_[13][13];
+    P_[15][15] = P_[13][13];
+    // variances for optional states
+
+    // earth frame and body frame magnetic field
+    // set to observation variance
+    for (uint8_t index = 16; index <= 21; index ++) {
+      P_[index][index] = sq(mag_noise_);
+    }
   }
   
   bool ESKF::initializeFilter() {
@@ -308,25 +327,47 @@ namespace eskf {
 
     // convert rate of change of accelerometer bias (m/s**3) as specified by the parameter to an expected change in delta velocity (m/s) since the last update
     scalar_t d_vel_bias_sig = dt * dt * constrain(accel_bias_p_noise_, 0.0f, 1.0f);
-        
+
+    // Don't continue to grow the earth field variances if they are becoming too large or we are not doing 3-axis fusion as this can make the covariance matrix badly conditioned
+    scalar_t mag_I_sig;
+
+    if (mag_3D_ && (P_[16][16] + P_[17][17] + P_[18][18]) < 0.1f) {
+      mag_I_sig = dt * constrain(mage_p_noise_, 0.0f, 1.0f);
+    } else {
+      mag_I_sig = 0.0f;
+    }
+
+    // Don't continue to grow the body field variances if they is becoming too large or we are not doing 3-axis fusion as this can make the covariance matrix badly conditioned
+    scalar_t mag_B_sig;
+
+    if (mag_3D_ && (P_[19][19] + P_[20][20] + P_[21][21]) < 0.1f) {
+      mag_B_sig = dt * constrain(magb_p_noise_, 0.0f, 1.0f);
+    } else {
+      mag_B_sig = 0.0f;
+    }
+
     // Construct the process noise variance diagonal for those states with a stationary process model
     // These are kinematic states and their error growth is controlled separately by the IMU noise variances
     for (unsigned i = 0; i <= 9; i++) {
       process_noise[i] = 0.0;
     }
-    
+
     // delta angle bias states
     process_noise[12] = process_noise[11] = process_noise[10] = sq(d_ang_bias_sig);
     // delta_velocity bias states
     process_noise[15] = process_noise[14] = process_noise[13] = sq(d_vel_bias_sig);
-        
+    // earth frame magnetic field states
+    process_noise[18] = process_noise[17] = process_noise[16] = sq(mag_I_sig);
+    // body frame magnetic field states
+    process_noise[21] = process_noise[20] = process_noise[19] = sq(mag_B_sig);
+
     // assign IMU noise variances
     // inputs to the system are 3 delta angles and 3 delta velocities
     scalar_t daxVar, dayVar, dazVar;
     scalar_t dvxVar, dvyVar, dvzVar;
     daxVar = dayVar = dazVar = sq(dt * gyro_noise_); // gyro prediction variance TODO get variance from sensor
     dvxVar = dvyVar = dvzVar = sq(dt * accel_noise_); //accel prediction variance TODO get variance from sensor
-    
+
     // intermediate calculations
     scalar_t SF[21];
     SF[0] = dvz - dvz_b;
@@ -486,11 +527,186 @@ namespace eskf {
     for (unsigned i = 0; i <= 12; i++) {
       nextP[i][i] += process_noise[i];
     }
-    
-    // Inhibit delta velocity bias learning by zeroing the covariance terms
-    zeroRows(nextP,13,15);
-    zeroCols(nextP,13,15);
-        
+
+    // calculate variances and upper diagonal covariances for IMU delta velocity bias states
+    nextP[0][13] = P_[0][13] + P_[1][13]*SF[9] + P_[2][13]*SF[11] + P_[3][13]*SF[10] + P_[10][13]*SF[14] + P_[11][13]*SF[15] + P_[12][13]*SPP[10];
+    nextP[1][13] = P_[1][13] + P_[0][13]*SF[8] + P_[2][13]*SF[7] + P_[3][13]*SF[11] - P_[12][13]*SF[15] + P_[11][13]*SPP[10] - (P_[10][13]*q0)/2;
+    nextP[2][13] = P_[2][13] + P_[0][13]*SF[6] + P_[1][13]*SF[10] + P_[3][13]*SF[8] + P_[12][13]*SF[14] - P_[10][13]*SPP[10] - (P_[11][13]*q0)/2;
+    nextP[3][13] = P_[3][13] + P_[0][13]*SF[7] + P_[1][13]*SF[6] + P_[2][13]*SF[9] + P_[10][13]*SF[15] - P_[11][13]*SF[14] - (P_[12][13]*q0)/2;
+    nextP[4][13] = P_[4][13] + P_[0][13]*SF[5] + P_[1][13]*SF[3] - P_[3][13]*SF[4] + P_[2][13]*SPP[0] + P_[13][13]*SPP[3] + P_[14][13]*SPP[6] - P_[15][13]*SPP[9];
+    nextP[5][13] = P_[5][13] + P_[0][13]*SF[4] + P_[2][13]*SF[3] + P_[3][13]*SF[5] - P_[1][13]*SPP[0] - P_[13][13]*SPP[8] + P_[14][13]*SPP[2] + P_[15][13]*SPP[5];
+    nextP[6][13] = P_[6][13] + P_[1][13]*SF[4] - P_[2][13]*SF[5] + P_[3][13]*SF[3] + P_[0][13]*SPP[0] + P_[13][13]*SPP[4] - P_[14][13]*SPP[7] - P_[15][13]*SPP[1];
+    nextP[7][13] = P_[7][13] + P_[4][13]*dt;
+    nextP[8][13] = P_[8][13] + P_[5][13]*dt;
+    nextP[9][13] = P_[9][13] + P_[6][13]*dt;
+    nextP[10][13] = P_[10][13];
+    nextP[11][13] = P_[11][13];
+    nextP[12][13] = P_[12][13];
+    nextP[13][13] = P_[13][13];
+    nextP[0][14] = P_[0][14] + P_[1][14]*SF[9] + P_[2][14]*SF[11] + P_[3][14]*SF[10] + P_[10][14]*SF[14] + P_[11][14]*SF[15] + P_[12][14]*SPP[10];
+    nextP[1][14] = P_[1][14] + P_[0][14]*SF[8] + P_[2][14]*SF[7] + P_[3][14]*SF[11] - P_[12][14]*SF[15] + P_[11][14]*SPP[10] - (P_[10][14]*q0)/2;
+    nextP[2][14] = P_[2][14] + P_[0][14]*SF[6] + P_[1][14]*SF[10] + P_[3][14]*SF[8] + P_[12][14]*SF[14] - P_[10][14]*SPP[10] - (P_[11][14]*q0)/2;
+    nextP[3][14] = P_[3][14] + P_[0][14]*SF[7] + P_[1][14]*SF[6] + P_[2][14]*SF[9] + P_[10][14]*SF[15] - P_[11][14]*SF[14] - (P_[12][14]*q0)/2;
+    nextP[4][14] = P_[4][14] + P_[0][14]*SF[5] + P_[1][14]*SF[3] - P_[3][14]*SF[4] + P_[2][14]*SPP[0] + P_[13][14]*SPP[3] + P_[14][14]*SPP[6] - P_[15][14]*SPP[9];
+    nextP[5][14] = P_[5][14] + P_[0][14]*SF[4] + P_[2][14]*SF[3] + P_[3][14]*SF[5] - P_[1][14]*SPP[0] - P_[13][14]*SPP[8] + P_[14][14]*SPP[2] + P_[15][14]*SPP[5];
+    nextP[6][14] = P_[6][14] + P_[1][14]*SF[4] - P_[2][14]*SF[5] + P_[3][14]*SF[3] + P_[0][14]*SPP[0] + P_[13][14]*SPP[4] - P_[14][14]*SPP[7] - P_[15][14]*SPP[1];
+    nextP[7][14] = P_[7][14] + P_[4][14]*dt;
+    nextP[8][14] = P_[8][14] + P_[5][14]*dt;
+    nextP[9][14] = P_[9][14] + P_[6][14]*dt;
+    nextP[10][14] = P_[10][14];
+    nextP[11][14] = P_[11][14];
+    nextP[12][14] = P_[12][14];
+    nextP[13][14] = P_[13][14];
+    nextP[14][14] = P_[14][14];
+    nextP[0][15] = P_[0][15] + P_[1][15]*SF[9] + P_[2][15]*SF[11] + P_[3][15]*SF[10] + P_[10][15]*SF[14] + P_[11][15]*SF[15] + P_[12][15]*SPP[10];
+    nextP[1][15] = P_[1][15] + P_[0][15]*SF[8] + P_[2][15]*SF[7] + P_[3][15]*SF[11] - P_[12][15]*SF[15] + P_[11][15]*SPP[10] - (P_[10][15]*q0)/2;
+    nextP[2][15] = P_[2][15] + P_[0][15]*SF[6] + P_[1][15]*SF[10] + P_[3][15]*SF[8] + P_[12][15]*SF[14] - P_[10][15]*SPP[10] - (P_[11][15]*q0)/2;
+    nextP[3][15] = P_[3][15] + P_[0][15]*SF[7] + P_[1][15]*SF[6] + P_[2][15]*SF[9] + P_[10][15]*SF[15] - P_[11][15]*SF[14] - (P_[12][15]*q0)/2;
+    nextP[4][15] = P_[4][15] + P_[0][15]*SF[5] + P_[1][15]*SF[3] - P_[3][15]*SF[4] + P_[2][15]*SPP[0] + P_[13][15]*SPP[3] + P_[14][15]*SPP[6] - P_[15][15]*SPP[9];
+    nextP[5][15] = P_[5][15] + P_[0][15]*SF[4] + P_[2][15]*SF[3] + P_[3][15]*SF[5] - P_[1][15]*SPP[0] - P_[13][15]*SPP[8] + P_[14][15]*SPP[2] + P_[15][15]*SPP[5];
+    nextP[6][15] = P_[6][15] + P_[1][15]*SF[4] - P_[2][15]*SF[5] + P_[3][15]*SF[3] + P_[0][15]*SPP[0] + P_[13][15]*SPP[4] - P_[14][15]*SPP[7] - P_[15][15]*SPP[1];
+    nextP[7][15] = P_[7][15] + P_[4][15]*dt;
+    nextP[8][15] = P_[8][15] + P_[5][15]*dt;
+    nextP[9][15] = P_[9][15] + P_[6][15]*dt;
+    nextP[10][15] = P_[10][15];
+    nextP[11][15] = P_[11][15];
+    nextP[12][15] = P_[12][15];
+    nextP[13][15] = P_[13][15];
+    nextP[14][15] = P_[14][15];
+    nextP[15][15] = P_[15][15];
+
+    // add process noise that is not from the IMU
+    for (unsigned i = 13; i <= 15; i++) {
+      nextP[i][i] += process_noise[i];
+    }
+
+    // Don't do covariance prediction on magnetic field states unless we are using 3-axis fusion
+    if (mag_3D_) {
+      // calculate variances and upper diagonal covariances for earth and body magnetic field states
+      nextP[0][16] = P_[0][16] + P_[1][16]*SF[9] + P_[2][16]*SF[11] + P_[3][16]*SF[10] + P_[10][16]*SF[14] + P_[11][16]*SF[15] + P_[12][16]*SPP[10];
+      nextP[1][16] = P_[1][16] + P_[0][16]*SF[8] + P_[2][16]*SF[7] + P_[3][16]*SF[11] - P_[12][16]*SF[15] + P_[11][16]*SPP[10] - (P_[10][16]*q0)/2;
+      nextP[2][16] = P_[2][16] + P_[0][16]*SF[6] + P_[1][16]*SF[10] + P_[3][16]*SF[8] + P_[12][16]*SF[14] - P_[10][16]*SPP[10] - (P_[11][16]*q0)/2;
+      nextP[3][16] = P_[3][16] + P_[0][16]*SF[7] + P_[1][16]*SF[6] + P_[2][16]*SF[9] + P_[10][16]*SF[15] - P_[11][16]*SF[14] - (P_[12][16]*q0)/2;
+      nextP[4][16] = P_[4][16] + P_[0][16]*SF[5] + P_[1][16]*SF[3] - P_[3][16]*SF[4] + P_[2][16]*SPP[0] + P_[13][16]*SPP[3] + P_[14][16]*SPP[6] - P_[15][16]*SPP[9];
+      nextP[5][16] = P_[5][16] + P_[0][16]*SF[4] + P_[2][16]*SF[3] + P_[3][16]*SF[5] - P_[1][16]*SPP[0] - P_[13][16]*SPP[8] + P_[14][16]*SPP[2] + P_[15][16]*SPP[5];
+      nextP[6][16] = P_[6][16] + P_[1][16]*SF[4] - P_[2][16]*SF[5] + P_[3][16]*SF[3] + P_[0][16]*SPP[0] + P_[13][16]*SPP[4] - P_[14][16]*SPP[7] - P_[15][16]*SPP[1];
+      nextP[7][16] = P_[7][16] + P_[4][16]*dt;
+      nextP[8][16] = P_[8][16] + P_[5][16]*dt;
+      nextP[9][16] = P_[9][16] + P_[6][16]*dt;
+      nextP[10][16] = P_[10][16];
+      nextP[11][16] = P_[11][16];
+      nextP[12][16] = P_[12][16];
+      nextP[13][16] = P_[13][16];
+      nextP[14][16] = P_[14][16];
+      nextP[15][16] = P_[15][16];
+      nextP[16][16] = P_[16][16];
+      nextP[0][17] = P_[0][17] + P_[1][17]*SF[9] + P_[2][17]*SF[11] + P_[3][17]*SF[10] + P_[10][17]*SF[14] + P_[11][17]*SF[15] + P_[12][17]*SPP[10];
+      nextP[1][17] = P_[1][17] + P_[0][17]*SF[8] + P_[2][17]*SF[7] + P_[3][17]*SF[11] - P_[12][17]*SF[15] + P_[11][17]*SPP[10] - (P_[10][17]*q0)/2;
+      nextP[2][17] = P_[2][17] + P_[0][17]*SF[6] + P_[1][17]*SF[10] + P_[3][17]*SF[8] + P_[12][17]*SF[14] - P_[10][17]*SPP[10] - (P_[11][17]*q0)/2;
+      nextP[3][17] = P_[3][17] + P_[0][17]*SF[7] + P_[1][17]*SF[6] + P_[2][17]*SF[9] + P_[10][17]*SF[15] - P_[11][17]*SF[14] - (P_[12][17]*q0)/2;
+      nextP[4][17] = P_[4][17] + P_[0][17]*SF[5] + P_[1][17]*SF[3] - P_[3][17]*SF[4] + P_[2][17]*SPP[0] + P_[13][17]*SPP[3] + P_[14][17]*SPP[6] - P_[15][17]*SPP[9];
+      nextP[5][17] = P_[5][17] + P_[0][17]*SF[4] + P_[2][17]*SF[3] + P_[3][17]*SF[5] - P_[1][17]*SPP[0] - P_[13][17]*SPP[8] + P_[14][17]*SPP[2] + P_[15][17]*SPP[5];
+      nextP[6][17] = P_[6][17] + P_[1][17]*SF[4] - P_[2][17]*SF[5] + P_[3][17]*SF[3] + P_[0][17]*SPP[0] + P_[13][17]*SPP[4] - P_[14][17]*SPP[7] - P_[15][17]*SPP[1];
+      nextP[7][17] = P_[7][17] + P_[4][17]*dt;
+      nextP[8][17] = P_[8][17] + P_[5][17]*dt;
+      nextP[9][17] = P_[9][17] + P_[6][17]*dt;
+      nextP[10][17] = P_[10][17];
+      nextP[11][17] = P_[11][17];
+      nextP[12][17] = P_[12][17];
+      nextP[13][17] = P_[13][17];
+      nextP[14][17] = P_[14][17];
+      nextP[15][17] = P_[15][17];
+      nextP[16][17] = P_[16][17];
+      nextP[17][17] = P_[17][17];
+      nextP[0][18] = P_[0][18] + P_[1][18]*SF[9] + P_[2][18]*SF[11] + P_[3][18]*SF[10] + P_[10][18]*SF[14] + P_[11][18]*SF[15] + P_[12][18]*SPP[10];
+      nextP[1][18] = P_[1][18] + P_[0][18]*SF[8] + P_[2][18]*SF[7] + P_[3][18]*SF[11] - P_[12][18]*SF[15] + P_[11][18]*SPP[10] - (P_[10][18]*q0)/2;
+      nextP[2][18] = P_[2][18] + P_[0][18]*SF[6] + P_[1][18]*SF[10] + P_[3][18]*SF[8] + P_[12][18]*SF[14] - P_[10][18]*SPP[10] - (P_[11][18]*q0)/2;
+      nextP[3][18] = P_[3][18] + P_[0][18]*SF[7] + P_[1][18]*SF[6] + P_[2][18]*SF[9] + P_[10][18]*SF[15] - P_[11][18]*SF[14] - (P_[12][18]*q0)/2;
+      nextP[4][18] = P_[4][18] + P_[0][18]*SF[5] + P_[1][18]*SF[3] - P_[3][18]*SF[4] + P_[2][18]*SPP[0] + P_[13][18]*SPP[3] + P_[14][18]*SPP[6] - P_[15][18]*SPP[9];
+      nextP[5][18] = P_[5][18] + P_[0][18]*SF[4] + P_[2][18]*SF[3] + P_[3][18]*SF[5] - P_[1][18]*SPP[0] - P_[13][18]*SPP[8] + P_[14][18]*SPP[2] + P_[15][18]*SPP[5];
+      nextP[6][18] = P_[6][18] + P_[1][18]*SF[4] - P_[2][18]*SF[5] + P_[3][18]*SF[3] + P_[0][18]*SPP[0] + P_[13][18]*SPP[4] - P_[14][18]*SPP[7] - P_[15][18]*SPP[1];
+      nextP[7][18] = P_[7][18] + P_[4][18]*dt;
+      nextP[8][18] = P_[8][18] + P_[5][18]*dt;
+      nextP[9][18] = P_[9][18] + P_[6][18]*dt;
+      nextP[10][18] = P_[10][18];
+      nextP[11][18] = P_[11][18];
+      nextP[12][18] = P_[12][18];
+      nextP[13][18] = P_[13][18];
+      nextP[14][18] = P_[14][18];
+      nextP[15][18] = P_[15][18];
+      nextP[16][18] = P_[16][18];
+      nextP[17][18] = P_[17][18];
+      nextP[18][18] = P_[18][18];
+      nextP[0][19] = P_[0][19] + P_[1][19]*SF[9] + P_[2][19]*SF[11] + P_[3][19]*SF[10] + P_[10][19]*SF[14] + P_[11][19]*SF[15] + P_[12][19]*SPP[10];
+      nextP[1][19] = P_[1][19] + P_[0][19]*SF[8] + P_[2][19]*SF[7] + P_[3][19]*SF[11] - P_[12][19]*SF[15] + P_[11][19]*SPP[10] - (P_[10][19]*q0)/2;
+      nextP[2][19] = P_[2][19] + P_[0][19]*SF[6] + P_[1][19]*SF[10] + P_[3][19]*SF[8] + P_[12][19]*SF[14] - P_[10][19]*SPP[10] - (P_[11][19]*q0)/2;
+      nextP[3][19] = P_[3][19] + P_[0][19]*SF[7] + P_[1][19]*SF[6] + P_[2][19]*SF[9] + P_[10][19]*SF[15] - P_[11][19]*SF[14] - (P_[12][19]*q0)/2;
+      nextP[4][19] = P_[4][19] + P_[0][19]*SF[5] + P_[1][19]*SF[3] - P_[3][19]*SF[4] + P_[2][19]*SPP[0] + P_[13][19]*SPP[3] + P_[14][19]*SPP[6] - P_[15][19]*SPP[9];
+      nextP[5][19] = P_[5][19] + P_[0][19]*SF[4] + P_[2][19]*SF[3] + P_[3][19]*SF[5] - P_[1][19]*SPP[0] - P_[13][19]*SPP[8] + P_[14][19]*SPP[2] + P_[15][19]*SPP[5];
+      nextP[6][19] = P_[6][19] + P_[1][19]*SF[4] - P_[2][19]*SF[5] + P_[3][19]*SF[3] + P_[0][19]*SPP[0] + P_[13][19]*SPP[4] - P_[14][19]*SPP[7] - P_[15][19]*SPP[1];
+      nextP[7][19] = P_[7][19] + P_[4][19]*dt;
+      nextP[8][19] = P_[8][19] + P_[5][19]*dt;
+      nextP[9][19] = P_[9][19] + P_[6][19]*dt;
+      nextP[10][19] = P_[10][19];
+      nextP[11][19] = P_[11][19];
+      nextP[12][19] = P_[12][19];
+      nextP[13][19] = P_[13][19];
+      nextP[14][19] = P_[14][19];
+      nextP[15][19] = P_[15][19];
+      nextP[16][19] = P_[16][19];
+      nextP[17][19] = P_[17][19];
+      nextP[18][19] = P_[18][19];
+      nextP[19][19] = P_[19][19];
+      nextP[0][20] = P_[0][20] + P_[1][20]*SF[9] + P_[2][20]*SF[11] + P_[3][20]*SF[10] + P_[10][20]*SF[14] + P_[11][20]*SF[15] + P_[12][20]*SPP[10];
+      nextP[1][20] = P_[1][20] + P_[0][20]*SF[8] + P_[2][20]*SF[7] + P_[3][20]*SF[11] - P_[12][20]*SF[15] + P_[11][20]*SPP[10] - (P_[10][20]*q0)/2;
+      nextP[2][20] = P_[2][20] + P_[0][20]*SF[6] + P_[1][20]*SF[10] + P_[3][20]*SF[8] + P_[12][20]*SF[14] - P_[10][20]*SPP[10] - (P_[11][20]*q0)/2;
+      nextP[3][20] = P_[3][20] + P_[0][20]*SF[7] + P_[1][20]*SF[6] + P_[2][20]*SF[9] + P_[10][20]*SF[15] - P_[11][20]*SF[14] - (P_[12][20]*q0)/2;
+      nextP[4][20] = P_[4][20] + P_[0][20]*SF[5] + P_[1][20]*SF[3] - P_[3][20]*SF[4] + P_[2][20]*SPP[0] + P_[13][20]*SPP[3] + P_[14][20]*SPP[6] - P_[15][20]*SPP[9];
+      nextP[5][20] = P_[5][20] + P_[0][20]*SF[4] + P_[2][20]*SF[3] + P_[3][20]*SF[5] - P_[1][20]*SPP[0] - P_[13][20]*SPP[8] + P_[14][20]*SPP[2] + P_[15][20]*SPP[5];
+      nextP[6][20] = P_[6][20] + P_[1][20]*SF[4] - P_[2][20]*SF[5] + P_[3][20]*SF[3] + P_[0][20]*SPP[0] + P_[13][20]*SPP[4] - P_[14][20]*SPP[7] - P_[15][20]*SPP[1];
+      nextP[7][20] = P_[7][20] + P_[4][20]*dt;
+      nextP[8][20] = P_[8][20] + P_[5][20]*dt;
+      nextP[9][20] = P_[9][20] + P_[6][20]*dt;
+      nextP[10][20] = P_[10][20];
+      nextP[11][20] = P_[11][20];
+      nextP[12][20] = P_[12][20];
+      nextP[13][20] = P_[13][20];
+      nextP[14][20] = P_[14][20];
+      nextP[15][20] = P_[15][20];
+      nextP[16][20] = P_[16][20];
+      nextP[17][20] = P_[17][20];
+      nextP[18][20] = P_[18][20];
+      nextP[19][20] = P_[19][20];
+      nextP[20][20] = P_[20][20];
+      nextP[0][21] = P_[0][21] + P_[1][21]*SF[9] + P_[2][21]*SF[11] + P_[3][21]*SF[10] + P_[10][21]*SF[14] + P_[11][21]*SF[15] + P_[12][21]*SPP[10];
+      nextP[1][21] = P_[1][21] + P_[0][21]*SF[8] + P_[2][21]*SF[7] + P_[3][21]*SF[11] - P_[12][21]*SF[15] + P_[11][21]*SPP[10] - (P_[10][21]*q0)/2;
+      nextP[2][21] = P_[2][21] + P_[0][21]*SF[6] + P_[1][21]*SF[10] + P_[3][21]*SF[8] + P_[12][21]*SF[14] - P_[10][21]*SPP[10] - (P_[11][21]*q0)/2;
+      nextP[3][21] = P_[3][21] + P_[0][21]*SF[7] + P_[1][21]*SF[6] + P_[2][21]*SF[9] + P_[10][21]*SF[15] - P_[11][21]*SF[14] - (P_[12][21]*q0)/2;
+      nextP[4][21] = P_[4][21] + P_[0][21]*SF[5] + P_[1][21]*SF[3] - P_[3][21]*SF[4] + P_[2][21]*SPP[0] + P_[13][21]*SPP[3] + P_[14][21]*SPP[6] - P_[15][21]*SPP[9];
+      nextP[5][21] = P_[5][21] + P_[0][21]*SF[4] + P_[2][21]*SF[3] + P_[3][21]*SF[5] - P_[1][21]*SPP[0] - P_[13][21]*SPP[8] + P_[14][21]*SPP[2] + P_[15][21]*SPP[5];
+      nextP[6][21] = P_[6][21] + P_[1][21]*SF[4] - P_[2][21]*SF[5] + P_[3][21]*SF[3] + P_[0][21]*SPP[0] + P_[13][21]*SPP[4] - P_[14][21]*SPP[7] - P_[15][21]*SPP[1];
+      nextP[7][21] = P_[7][21] + P_[4][21]*dt;
+      nextP[8][21] = P_[8][21] + P_[5][21]*dt;
+      nextP[9][21] = P_[9][21] + P_[6][21]*dt;
+      nextP[10][21] = P_[10][21];
+      nextP[11][21] = P_[11][21];
+      nextP[12][21] = P_[12][21];
+      nextP[13][21] = P_[13][21];
+      nextP[14][21] = P_[14][21];
+      nextP[15][21] = P_[15][21];
+      nextP[16][21] = P_[16][21];
+      nextP[17][21] = P_[17][21];
+      nextP[18][21] = P_[18][21];
+      nextP[19][21] = P_[19][21];
+      nextP[20][21] = P_[20][21];
+      nextP[21][21] = P_[21][21];
+
+      // add process noise that is not from the IMU
+      for (unsigned i = 16; i <= 21; i++) {
+        nextP[i][i] += process_noise[i];
+      }
+    }
+
     // stop position covariance growth if our total position variance reaches 100m
     if ((P_[7][7] + P_[8][8]) > 1.0e4) {
       for (uint8_t i = 7; i <= 8; i++) {
@@ -521,6 +737,7 @@ namespace eskf {
     gps_data_ready_ = gps_buffer_.pop_first_older_than(imu_sample_delayed_.time_us, &gps_sample_delayed_);
     vision_data_ready_ = ext_vision_buffer_.pop_first_older_than(imu_sample_delayed_.time_us, &ev_sample_delayed_);
     flow_data_ready_ = opt_flow_buffer_.pop_first_older_than(imu_sample_delayed_.time_us, &opt_flow_sample_delayed_);
+    mag_data_ready_ = mag_buffer_.pop_first_older_than(imu_sample_delayed_.time_us, &mag_sample_delayed_);
 
     R_rng_to_earth_2_2_ = R_to_earth_(2, 0) * sin_tilt_rng_ + R_to_earth_(2, 2) * cos_tilt_rng_;
     range_data_ready_ = range_buffer_.pop_first_older_than(imu_sample_delayed_.time_us, &range_sample_delayed_) && (R_rng_to_earth_2_2_ > range_cos_max_tilt_);
@@ -1096,7 +1313,7 @@ namespace eskf {
   }
 
   void ESKF::controlMagFusion() {
-    if(fusion_mask_ & MASK_MAG_YAW) {
+    if(fusion_mask_ & MASK_MAG_INHIBIT) {
       mag_use_inhibit_ = true;
       fuseHeading();
     }
@@ -1690,6 +1907,22 @@ namespace eskf {
     }
   }
 
+  void ESKF::updateMagnetometer(const vec3& m, uint64_t time_usec, scalar_t dt) {
+    // transform position from local ENU to local NED frame
+    vec3 m_nb = q_NED2ENU.inverse().toRotationMatrix() * m;
+
+    // limit data rate to prevent data being lost
+    if ((time_usec - time_last_mag_) > min_obs_interval_us_) {
+      magSample mag_sample_new;
+      mag_sample_new.time_us = time_usec - mag_delay_ms_ * 1000;
+
+      mag_sample_new.time_us -= FILTER_UPDATE_PERIOD_MS * 1000 / 2;
+      time_last_mag_ = time_usec;
+      mag_sample_new.mag = m_nb;
+      mag_buffer_.push(mag_sample_new);
+    }
+  }
+
   void ESKF::updateLandedState(uint8_t landed_state) {
     in_air_ = landed_state;
   }
@@ -1727,6 +1960,7 @@ namespace eskf {
 
     scalar_t predicted_hdg, measured_hdg;
     scalar_t H_YAW[4];
+    vec3 mag_earth_pred;
 
     // determine if a 321 or 312 Euler sequence is best
     if (fabsf(R_to_earth_(2, 0)) < fabsf(R_to_earth_(2, 1))) {
@@ -1764,11 +1998,32 @@ namespace eskf {
       vec3 euler321 = dcm2vec(quat2dcm(state_.quat_nominal));
       predicted_hdg = euler321(2); // we will need the predicted heading to calculate the innovation
 
-      // calculate the yaw angle for a 321 sequence
-      // Expressions obtained from yaw_input_321.c produced by https://github.com/PX4/ecl/blob/master/matlab/scripts/Inertial%20Nav%20EKF/quat2yaw321.m
-      scalar_t Tbn_1_0 = 2.0f*(ev_sample_delayed_.quatNED.w() * ev_sample_delayed_.quatNED.z() + ev_sample_delayed_.quatNED.x() * ev_sample_delayed_.quatNED.y());
-      scalar_t Tbn_0_0 = sq(ev_sample_delayed_.quatNED.w()) + sq(ev_sample_delayed_.quatNED.x()) - sq(ev_sample_delayed_.quatNED.y()) - sq(ev_sample_delayed_.quatNED.z());
-      measured_hdg = atan2f(Tbn_1_0,Tbn_0_0);
+      // calculate the observed yaw angle
+      if (mag_hdg_) {
+        // Set the yaw angle to zero and rotate the measurements into earth frame using the zero yaw angle
+        euler321(2) = 0.0f;
+        mat3 R_to_earth = quat2dcm(from_euler(euler321));
+
+        // rotate the magnetometer measurements into earth frame using a zero yaw angle
+        if (mag_3D_) {
+          // don't apply bias corrections if we are learning them
+          mag_earth_pred = R_to_earth * mag_sample_delayed_.mag;
+        } else {
+          mag_earth_pred = R_to_earth * (mag_sample_delayed_.mag - state_.mag_B);
+        }
+
+        // the angle of the projection onto the horizontal gives the yaw angle
+        measured_hdg = -atan2f(mag_earth_pred(1), mag_earth_pred(0)) + mag_declination_;
+
+      } else if (ev_yaw_) {
+
+        // calculate the yaw angle for a 321 sequence
+        // Expressions obtained from yaw_input_321.c produced by https://github.com/PX4/ecl/blob/master/matlab/scripts/Inertial%20Nav%20EKF/quat2yaw321.m
+        scalar_t Tbn_1_0 = 2.0f*(ev_sample_delayed_.quatNED.w() * ev_sample_delayed_.quatNED.z() + ev_sample_delayed_.quatNED.x() * ev_sample_delayed_.quatNED.y());
+        scalar_t Tbn_0_0 = sq(ev_sample_delayed_.quatNED.w()) + sq(ev_sample_delayed_.quatNED.x()) - sq(ev_sample_delayed_.quatNED.y()) - sq(ev_sample_delayed_.quatNED.z());
+        measured_hdg = atan2f(Tbn_1_0,Tbn_0_0);
+
+      } else return;
     }
     else {
       // calculate observaton jacobian when we are observing a rotation in a 312 sequence
@@ -1802,16 +2057,65 @@ namespace eskf {
       H_YAW[3] = t8*t14*(q0*t3-q0*t4+q0*t5+q0*t6-q1*q2*q3*2.0f)*2.0f;
 
       scalar_t yaw = atan2f(-R_to_earth_(0, 1), R_to_earth_(1, 1)); // first rotation (yaw)
+      scalar_t roll = asinf(R_to_earth_(2, 1)); // second rotation (roll)
+      scalar_t pitch = atan2f(-R_to_earth_(2, 0), R_to_earth_(2, 2)); // third rotation (pitch)
 
       predicted_hdg = yaw; // we will need the predicted heading to calculate the innovation
-      // calculate the yaw angle for a 312 sequence
-      // Values from yaw_input_312.c file produced by https://github.com/PX4/ecl/blob/master/matlab/scripts/Inertial%20Nav%20EKF/quat2yaw312.m
-      scalar_t Tbn_0_1_neg = 2.0f * (ev_sample_delayed_.quatNED.w() * ev_sample_delayed_.quatNED.z() - ev_sample_delayed_.quatNED.x() * ev_sample_delayed_.quatNED.y());
-      scalar_t Tbn_1_1 = sq(ev_sample_delayed_.quatNED.w()) - sq(ev_sample_delayed_.quatNED.x()) + sq(ev_sample_delayed_.quatNED.y()) - sq(ev_sample_delayed_.quatNED.z());
-      measured_hdg = atan2f(Tbn_0_1_neg, Tbn_1_1);
+
+      // calculate the observed yaw angle
+      if (mag_hdg_) {
+        // Set the first rotation (yaw) to zero and rotate the measurements into earth frame
+        yaw = 0.0f;
+
+        // Calculate the body to earth frame rotation matrix from the euler angles using a 312 rotation sequence
+        // Equations from Tbn_312.c produced by https://github.com/PX4/ecl/blob/master/matlab/scripts/Inertial%20Nav%20EKF/quat2yaw312.m
+        mat3 R_to_earth;
+        scalar_t sy = sinf(yaw);
+        scalar_t cy = cosf(yaw);
+        scalar_t sp = sinf(pitch);
+        scalar_t cp = cosf(pitch);
+        scalar_t sr = sinf(roll);
+        scalar_t cr = cosf(roll);
+        R_to_earth(0,0) = cy*cp-sy*sp*sr;
+        R_to_earth(0,1) = -sy*cr;
+        R_to_earth(0,2) = cy*sp+sy*cp*sr;
+        R_to_earth(1,0) = sy*cp+cy*sp*sr;
+        R_to_earth(1,1) = cy*cr;
+        R_to_earth(1,2) = sy*sp-cy*cp*sr;
+        R_to_earth(2,0) = -sp*cr;
+        R_to_earth(2,1) = sr;
+        R_to_earth(2,2) = cp*cr;
+
+        // rotate the magnetometer measurements into earth frame using a zero yaw angle
+        if (mag_3D_) {
+          // don't apply bias corrections if we are learning them
+          mag_earth_pred = R_to_earth * mag_sample_delayed_.mag;
+        } else {
+          mag_earth_pred = R_to_earth * (mag_sample_delayed_.mag - state_.mag_B);
+        }
+
+        // the angle of the projection onto the horizontal gives the yaw angle
+        measured_hdg = -atan2f(mag_earth_pred(1), mag_earth_pred(0)) + mag_declination_;
+
+      } else if (ev_yaw_) {
+        // calculate the yaw angle for a 312 sequence
+        // Values from yaw_input_312.c file produced by https://github.com/PX4/ecl/blob/master/matlab/scripts/Inertial%20Nav%20EKF/quat2yaw312.m
+        scalar_t Tbn_0_1_neg = 2.0f * (ev_sample_delayed_.quatNED.w() * ev_sample_delayed_.quatNED.z() - ev_sample_delayed_.quatNED.x() * ev_sample_delayed_.quatNED.y());
+        scalar_t Tbn_1_1 = sq(ev_sample_delayed_.quatNED.w()) - sq(ev_sample_delayed_.quatNED.x()) + sq(ev_sample_delayed_.quatNED.y()) - sq(ev_sample_delayed_.quatNED.z());
+        measured_hdg = atan2f(Tbn_0_1_neg, Tbn_1_1);
+
+      } else return;
     }
 
-    scalar_t R_YAW = sq(fmaxf(ev_sample_delayed_.angErr, 1.0e-2f));
+    scalar_t R_YAW; // calculate observation variance
+    if (mag_hdg_) {
+      // using magnetic heading tuning parameter
+      R_YAW = sq(fmaxf(mag_heading_noise_, 1.0e-2f));
+    } else if (ev_yaw_)
+      // using error estimate from external vision data
+      R_YAW = sq(fmaxf(ev_sample_delayed_.angErr, 1.0e-2f));
+    else return;
+
     // Calculate innovation variance and Kalman gains, taking advantage of the fact that only the first 3 elements in H are non zero
     // calculate the innovaton variance
     scalar_t PH[4];
@@ -1946,12 +2250,15 @@ namespace eskf {
   }
 
   void ESKF::fixCovarianceErrors() {
-    scalar_t P_lim[4] = {};
+    scalar_t P_lim[7] = {};
     P_lim[0] = 1.0f;		// quaternion max var
     P_lim[1] = 1e6f;		// velocity max var
     P_lim[2] = 1e6f;		// positiion max var
     P_lim[3] = 1.0f;		// gyro bias max var
-        
+    P_lim[4] = 1.0f;		// delta velocity z bias max var
+    P_lim[5] = 1.0f;		// earth mag field max var
+    P_lim[6] = 1.0f;		// body mag field max var
+    
     for (int i = 0; i <= 3; i++) {
       // quaternion states
       P_[i][i] = constrain(P_[i][i], 0.0f, P_lim[0]);
@@ -1974,10 +2281,94 @@ namespace eskf {
     
     // force symmetry on the quaternion, velocity, positon and gyro bias state covariances
     makeSymmetrical(P_,0,12);
-    
-    // accelerometer bias states zeros (inhibited)
-    zeroRows(P_,13,15);
-    zeroCols(P_,13,15);
+
+    // Find the maximum delta velocity bias state variance and request a covariance reset if any variance is below the safe minimum
+    const scalar_t minSafeStateVar = 1e-9f;
+    scalar_t maxStateVar = minSafeStateVar;
+    bool resetRequired = false;
+
+    for (uint8_t stateIndex = 13; stateIndex <= 15; stateIndex++) {
+      if (P_[stateIndex][stateIndex] > maxStateVar) {
+        maxStateVar = P_[stateIndex][stateIndex];
+      } else if (P_[stateIndex][stateIndex] < minSafeStateVar) {
+        resetRequired = true;
+      }
+    }
+
+    // To ensure stability of the covariance matrix operations, the ratio of a max and min variance must
+    // not exceed 100 and the minimum variance must not fall below the target minimum
+    // Also limit variance to a maximum equivalent to a 0.1g uncertainty
+    const scalar_t minStateVarTarget = 5E-8f;
+    scalar_t minAllowedStateVar = fmaxf(0.01f * maxStateVar, minStateVarTarget);
+
+    for (uint8_t stateIndex = 13; stateIndex <= 15; stateIndex++) {
+      P_[stateIndex][stateIndex] = constrain(P_[stateIndex][stateIndex], minAllowedStateVar, sq(0.1f * CONSTANTS_ONE_G * dt_ekf_avg_));
+    }
+
+    // If any one axis has fallen below the safe minimum, all delta velocity covariance terms must be reset to zero
+    if (resetRequired) {
+      scalar_t delVelBiasVar[3];
+
+      // store all delta velocity bias variances
+      for (uint8_t stateIndex = 13; stateIndex <= 15; stateIndex++) {
+        delVelBiasVar[stateIndex - 13] = P_[stateIndex][stateIndex];
+      }
+
+      // reset all delta velocity bias covariances
+      zeroCols(P_, 13, 15);
+
+      // restore all delta velocity bias variances
+      for (uint8_t stateIndex = 13; stateIndex <= 15; stateIndex++) {
+        P_[stateIndex][stateIndex] = delVelBiasVar[stateIndex - 13];
+      }
+    }
+
+    // Run additional checks to see if the delta velocity bias has hit limits in a direction that is clearly wrong
+    // calculate accel bias term aligned with the gravity vector
+    //scalar_t dVel_bias_lim = 0.9f * acc_bias_lim * dt_ekf_avg_;
+    scalar_t down_dvel_bias = 0.0f;
+
+    for (uint8_t axis_index = 0; axis_index < 3; axis_index++) {
+      down_dvel_bias += state_.accel_bias(axis_index) * R_to_earth_(2, axis_index);
+    }
+
+    // check that the vertical componenent of accel bias is consistent with both the vertical position and velocity innovation
+    //bool bad_acc_bias = (fabsf(down_dvel_bias) > dVel_bias_lim && down_dvel_bias * vel_pos_innov_[2] < 0.0f && down_dvel_bias * vel_pos_innov_[5] < 0.0f);
+
+    // if we have failed for 7 seconds continuously, reset the accel bias covariances to fix bad conditioning of
+    // the covariance matrix but preserve the variances (diagonals) to allow bias learning to continue
+    if (time_last_imu_ - time_acc_bias_check_ > (uint64_t)7e6) {
+      scalar_t varX = P_[13][13];
+      scalar_t varY = P_[14][14];
+      scalar_t varZ = P_[15][15];
+      zeroRows(P_, 13, 15);
+      zeroCols(P_, 13, 15);
+      P_[13][13] = varX;
+      P_[14][14] = varY;
+      P_[15][15] = varZ;
+      //ECL_WARN("EKF invalid accel bias - resetting covariance");
+    } else {
+      // ensure the covariance values are symmetrical
+      makeSymmetrical(P_, 13, 15);
+    }
+
+    // magnetic field states
+    if (!mag_3D_) {
+      zeroRows(P_, 16, 21);
+      zeroCols(P_, 16, 21);
+    } else {
+      // constrain variances
+      for (int i = 16; i <= 18; i++) {
+        P_[i][i] = constrain(P_[i][i], 0.0f, P_lim[5]);
+      }
+
+      for (int i = 19; i <= 21; i++) {
+        P_[i][i] = constrain(P_[i][i], 0.0f, P_lim[6]);
+      }
+
+      // force symmetry
+      makeSymmetrical(P_, 16, 21);
+    }
   }
   
   // This function forces the covariance matrix to be symmetric
@@ -2014,6 +2405,14 @@ namespace eskf {
 
     for (unsigned i = 0; i < 3; i++) {
       state_.accel_bias(i) = state_.accel_bias(i) - K[i + 13] * innovation;
+    }
+    
+    for (unsigned i = 0; i < 3; i++) {
+      state_.mag_I(i) = state_.mag_I(i) - K[i + 16] * innovation;
+    }
+
+    for (unsigned i = 0; i < 3; i++) {
+      state_.mag_B(i) = state_.mag_B(i) - K[i + 19] * innovation;
     }
   }
 
@@ -2188,6 +2587,14 @@ namespace eskf {
 
     for (int i = 0; i < 3; i++) {
       state_.accel_bias(i) = constrain(state_.accel_bias(i), -acc_bias_lim * dt_ekf_avg_, acc_bias_lim * dt_ekf_avg_);
+    }
+    
+    for (int i = 0; i < 3; i++) {
+      state_.mag_I(i) = constrain(state_.mag_I(i), -1.0f, 1.0f);
+    }
+
+    for (int i = 0; i < 3; i++) {
+      state_.mag_B(i) = constrain(state_.mag_B(i), -0.5f, 0.5f);
     }
   }
 

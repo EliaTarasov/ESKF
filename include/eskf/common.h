@@ -14,9 +14,10 @@
 #define MASK_GPS_POS 1<<3
 #define MASK_GPS_VEL 1<<4
 #define MASK_GPS_HGT 1<<5
-#define MASK_MAG_YAW 1<<6
+#define MASK_MAG_INHIBIT 1<<6
 #define MASK_OPTICAL_FLOW 1<<7
 #define MASK_LIDAR 1<<8
+#define MASK_MAG_HEADING 1<<9
 #define MASK_EV (MASK_EV_POS | MASK_EV_YAW | MASK_EV_HGT)
 #define MASK_GPS (MASK_GPS_POS | MASK_GPS_VEL | MASK_GPS_HGT)
 
@@ -53,6 +54,8 @@ namespace eskf {
     vec3  pos;          ///< NED position in earth frame in m
     vec3  gyro_bias;    ///< delta angle bias estimate in rad
     vec3  accel_bias;   ///< delta velocity bias estimate in m/s
+    vec3  mag_I;	///< NED earth magnetic field in gauss
+    vec3  mag_B;	///< magnetometer bias estimate in body frame in gauss
   };
 
   struct imuSample {
@@ -93,6 +96,11 @@ namespace eskf {
   struct rangeSample {
     scalar_t       rng;	///< range (distance to ground) measurement (m)
     uint64_t    time_us;	///< timestamp of the measurement (uSec)
+  };
+
+  struct magSample {
+    vec3     mag;	///< NED magnetometer body frame measurements (Gauss)
+    uint64_t   time_us;	///< timestamp of the measurement (uSec)
   };
 
   struct gps_message {
@@ -267,6 +275,34 @@ namespace eskf {
     dcm(2, 1) = 2.0f * (q23 + q01);
     
     return dcm;
+  }
+
+  /**
+   * Constructor from euler angles
+   *
+   * This sets the instance to a quaternion representing coordinate transformation from
+   * frame 2 to frame 1 where the rotation from frame 1 to frame 2 is described
+   * by a 3-2-1 intrinsic Tait-Bryan rotation sequence.
+   *
+   * @param euler euler angle instance
+   */
+  inline quat from_euler(const vec3& euler) {
+    quat q;
+    scalar_t cosPhi_2 = cos(euler(0) / 2.0);
+    scalar_t cosTheta_2 = cos(euler(1) / 2.0);
+    scalar_t cosPsi_2 = cos(euler(2) / 2.0);
+    scalar_t sinPhi_2 = sin(euler(0) / 2.0);
+    scalar_t sinTheta_2 = sin(euler(1) / 2.0);
+    scalar_t sinPsi_2 = sin(euler(2) / 2.0);
+    q.w() = cosPhi_2 * cosTheta_2 * cosPsi_2 +
+           sinPhi_2 * sinTheta_2 * sinPsi_2;
+    q.x() = sinPhi_2 * cosTheta_2 * cosPsi_2 -
+           cosPhi_2 * sinTheta_2 * sinPsi_2;
+    q.y() = cosPhi_2 * sinTheta_2 * cosPsi_2 +
+           sinPhi_2 * cosTheta_2 * sinPsi_2;
+    q.z() = cosPhi_2 * cosTheta_2 * sinPsi_2 -
+           sinPhi_2 * sinTheta_2 * cosPsi_2;
+    return q;
   }
 }
 

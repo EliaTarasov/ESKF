@@ -25,6 +25,10 @@ Node::Node(const ros::NodeHandle &nh, const ros::NodeHandle &pnh) : nh_(pnh), in
     ROS_INFO("Subscribing to optical_flow");
     subOpticalFlowPose_ = nh_.subscribe("optical_flow", 1, &Node::opticalFlowCallback, this);
   }
+  if(fusion_mask & MASK_MAG_HEADING) {
+    ROS_INFO("Subscribing to mag");
+    subMagPose_ = nh_.subscribe("mag", 1, &Node::magCallback, this);
+  }
 
   eskf_.setFusionMask(fusion_mask);
 
@@ -91,6 +95,15 @@ void Node::opticalFlowCallback(const mavros_msgs::OpticalFlowRadConstPtr& optica
     eskf_.updateOpticalFlow(int_xy, int_xy_gyro, integration_time, distance, quality, static_cast<uint64_t>(opticalFlowMsg->header.stamp.toSec() * 1e6f), delta);
   }
   prevStampOpticalFlowPose_ = opticalFlowMsg->header.stamp;
+}
+
+void Node::magCallback(const sensor_msgs::MagneticFieldConstPtr& magMsg) {
+  if (prevStampMagPose_.sec != 0) {
+    const double delta = (magMsg->header.stamp - prevStampMagPose_).toSec();
+    // get mag measurements
+    vec3 m = vec3(magMsg->magnetic_field.x, magMsg->magnetic_field.y, magMsg->magnetic_field.z);
+    eskf_.updateMagnetometer(m, static_cast<uint64_t>(magMsg->header.stamp.toSec() * 1e6f), delta);
+  }
 }
 
 void Node::extendedStateCallback(const mavros_msgs::ExtendedStateConstPtr& extendedStateMsg) {

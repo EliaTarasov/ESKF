@@ -9,7 +9,7 @@ namespace eskf {
   class ESKF {
   public:
 
-    static constexpr int k_num_states_ = 16;
+    static constexpr int k_num_states_ = 22;
 
     ESKF();
 
@@ -19,6 +19,7 @@ namespace eskf {
     void updateVision(const quat& q, const vec3& p, uint64_t time_us, scalar_t dt);
     void updateGps(const vec3& v, const vec3& p, uint64_t time_us, scalar_t dt);
     void updateOpticalFlow(const vec2& int_xy, const vec2& int_xy_gyro, uint32_t integration_time_us, scalar_t distance, uint8_t quality, uint64_t time_us, scalar_t dt);
+    void updateMagnetometer(const vec3& m, uint64_t time_us, scalar_t dt);
     void updateLandedState(uint8_t landed_state);
 
     quat getQuat();
@@ -66,6 +67,7 @@ namespace eskf {
     RingBuffer<gpsSample> gps_buffer_;
     RingBuffer<rangeSample> range_buffer_;
     RingBuffer<optFlowSample> opt_flow_buffer_;
+    RingBuffer<magSample> mag_buffer_;
 
     ///< FIFO buffers lengths
     const int obs_buffer_length_ {9};
@@ -77,6 +79,7 @@ namespace eskf {
     gpsSample gps_sample_delayed_ {};	// captures the gps sample on the delayed time horizon
     rangeSample range_sample_delayed_{};  // captures the range sample on the delayed time horizon
     optFlowSample opt_flow_sample_delayed_ {};	// captures the optical flow sample on the delayed time horizon
+    magSample mag_sample_delayed_ {}; //captures magnetometer sample on the delayed time horizon
 
     ///< new samples
     imuSample imu_sample_new_ {};  ///< imu sample capturing the newest imu data
@@ -94,16 +97,19 @@ namespace eskf {
     uint64_t time_last_ext_vision_ {0};
     uint64_t time_last_gps_ {0};
     uint64_t time_last_imu_ {0};
+    uint64_t time_last_mag_ {0};
     uint64_t time_last_hgt_fuse_ {0};
     uint64_t time_last_range_ {0};
     uint64_t time_last_fake_gps_ {0};
     uint64_t time_last_hagl_fuse_{0};		///< last system time that the hagl measurement failed it's checks (uSec)
+    uint64_t time_acc_bias_check_{0};
 
     ///< sensors delays
     scalar_t gps_delay_ms_ {110.0f};		///< gps measurement delay relative to the IMU (mSec)
     scalar_t ev_delay_ms_ {100.0f};		///< off-board vision measurement delay relative to the IMU (mSec)
     scalar_t flow_delay_ms_ {5.0f};		///< optical flow measurement delay relative to the IMU (mSec) - this is to the middle of the optical flow integration interval
     scalar_t range_delay_ms_{5.0f};		///< range finder measurement delay relative to the IMU (mSec)
+    scalar_t mag_delay_ms_{5.0f};
 
     ///< frames rotations
     mat3 R_to_earth_;  ///< Rotation (DCM) from FRD to NED
@@ -216,12 +222,20 @@ namespace eskf {
     vec3 imu_del_ang_of_;	///< bias corrected delta angle measurements accumulated across the same time frame as the optical flow rates (rad)
     scalar_t delta_time_of_{0.0f};	///< time in sec that _imu_del_ang_of was accumulated over (sec)
 
+    ///< mag specific params
+    scalar_t mag_declination_{0.0f};
+    scalar_t mag_heading_noise_{3.0e-1f};
+    scalar_t mage_p_noise_{1.0e-3f};		///< process noise for earth magnetic field prediction (Gauss/sec)
+    scalar_t magb_p_noise_{1.0e-4f};		///< process noise for body magnetic field prediction (Gauss/sec)
+    scalar_t mag_noise_{5.0e-2f};		///< measurement noise used for 3-axis magnetoemeter fusion (Gauss)
+
     bool imu_updated_;
     vec3 last_known_posNED_;
 
     static constexpr scalar_t kOneG = 9.80665;  /// Earth gravity (m/s^2)
     static constexpr scalar_t acc_bias_lim = 0.4; ///< maximum accel bias magnitude (m/sec**2)
     static constexpr scalar_t hgt_reset_lim = 0.0f; ///< 
+    static constexpr scalar_t CONSTANTS_ONE_G = 9.80665f; // m/s^2
 
     bool mag_use_inhibit_{false};		///< true when magnetomer use is being inhibited
     bool mag_use_inhibit_prev_{false};		///< true when magnetomer use was being inhibited the previous frame
@@ -232,10 +246,13 @@ namespace eskf {
     bool vision_data_ready_ = false;
     bool range_data_ready_ = false;
     bool flow_data_ready_ = false;
+    bool mag_data_ready_ = false;
 
     ///< flags on fusion modes
     bool fuse_pos_ = false;
     bool fuse_height_ = false;
+    bool mag_hdg_ = false;
+    bool mag_3D_ = false;
     bool opt_flow_ = false;
     bool ev_pos_ = false;
     bool ev_yaw_ = false;

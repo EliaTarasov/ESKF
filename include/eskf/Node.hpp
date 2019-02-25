@@ -3,6 +3,7 @@
 
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
+#include <sensor_msgs/MagneticField.h>
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
@@ -31,6 +32,7 @@ namespace eskf {
     ros::Subscriber subVisionPose_;
     ros::Subscriber subGpsPose_;
     ros::Subscriber subOpticalFlowPose_;
+    ros::Subscriber subMagPose_;
     ros::Subscriber subExtendedState_;
 
     // implementation
@@ -39,6 +41,7 @@ namespace eskf {
     ros::Time prevStampVisionPose_;
     ros::Time prevStampGpsPose_;
     ros::Time prevStampOpticalFlowPose_;
+    ros::Time prevStampMagPose_;
     ros::Timer pubTimer_;
     bool init_;
 
@@ -47,6 +50,7 @@ namespace eskf {
     void visionCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr&);
     void gpsCallback(const nav_msgs::OdometryConstPtr&);
     void opticalFlowCallback(const mavros_msgs::OpticalFlowRadConstPtr&);
+    void magCallback(const sensor_msgs::MagneticFieldConstPtr&);
     void extendedStateCallback(const mavros_msgs::ExtendedStateConstPtr&);
     void publishState(const ros::TimerEvent&);
   };
