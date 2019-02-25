@@ -1,5 +1,5 @@
 # ESKF
-ROS Error-State Kalman Filter based on PX4/ecl. Performs GPS/Vision Pose/Optical Flow/RangeFinder fusion with IMU
+ROS Error-State Kalman Filter based on PX4/ecl. Performs GPS/Magnetometer/Vision Pose/Optical Flow/RangeFinder fusion with IMU
 
 # Description
 Multisensor fusion ROS node with delayed time horizon based on EKF2.
