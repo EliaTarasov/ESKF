@@ -109,7 +109,7 @@ namespace eskf {
     scalar_t ev_delay_ms_ {100.0f};		///< off-board vision measurement delay relative to the IMU (mSec)
     scalar_t flow_delay_ms_ {5.0f};		///< optical flow measurement delay relative to the IMU (mSec) - this is to the middle of the optical flow integration interval
     scalar_t range_delay_ms_{5.0f};		///< range finder measurement delay relative to the IMU (mSec)
-    scalar_t mag_delay_ms_{5.0f};
+    scalar_t mag_delay_ms_{0.0f};
 
     ///< frames rotations
     mat3 R_to_earth_;  ///< Rotation (DCM) from FRD to NED

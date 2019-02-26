@@ -104,6 +104,7 @@ void Node::magCallback(const sensor_msgs::MagneticFieldConstPtr& magMsg) {
     vec3 m = vec3(magMsg->magnetic_field.x, magMsg->magnetic_field.y, magMsg->magnetic_field.z);
     eskf_.updateMagnetometer(m, static_cast<uint64_t>(magMsg->header.stamp.toSec() * 1e6f), delta);
   }
+  prevStampMagPose_ = magMsg->header.stamp;
 }
 
 void Node::extendedStateCallback(const mavros_msgs::ExtendedStateConstPtr& extendedStateMsg) {

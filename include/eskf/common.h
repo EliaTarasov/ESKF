@@ -7,6 +7,7 @@
 #define EV_MAX_INTERVAL		2e5	///< Maximum allowable time interval between external vision system measurements (uSec)
 #define GPS_MAX_INTERVAL	1e6	///< Maximum allowable time interval between external gps system measurements (uSec)
 #define OPTICAL_FLOW_INTERVAL	2e5	///< Maximum allowable time interval between optical flow system measurements (uSec)
+#define MAG_INTERVAL		2e5	///< Maximum allowable time interval between mag system measurements (uSec)
 
 #define MASK_EV_POS 1<<0
 #define MASK_EV_YAW 1<<1

@@ -1316,6 +1316,18 @@ namespace eskf {
     if(fusion_mask_ & MASK_MAG_INHIBIT) {
       mag_use_inhibit_ = true;
       fuseHeading();
+    } else if(mag_data_ready_) {
+      // determine if we should use the yaw observation
+      if ((fusion_mask_ & MASK_MAG_HEADING) && (!mag_hdg_)) {
+        if (time_last_imu_ - time_last_mag_ < 2 * MAG_INTERVAL) {
+          mag_hdg_ = true;
+          printf("ESKF commencing mag yaw fusion\n");
+        }
+      }
+
+      if(mag_hdg_) {
+        fuseHeading();
+      }
     }
   }
 
