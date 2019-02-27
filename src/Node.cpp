@@ -101,7 +101,7 @@ void Node::magCallback(const sensor_msgs::MagneticFieldConstPtr& magMsg) {
   if (prevStampMagPose_.sec != 0) {
     const double delta = (magMsg->header.stamp - prevStampMagPose_).toSec();
     // get mag measurements
-    vec3 m = vec3(magMsg->magnetic_field.x, magMsg->magnetic_field.y, magMsg->magnetic_field.z);
+    vec3 m = vec3(magMsg->magnetic_field.x * 1e4f, magMsg->magnetic_field.y * 1e4f, magMsg->magnetic_field.z * 1e4f);
     eskf_.updateMagnetometer(m, static_cast<uint64_t>(magMsg->header.stamp.toSec() * 1e6f), delta);
   }
   prevStampMagPose_ = magMsg->header.stamp;

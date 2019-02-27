@@ -1920,7 +1920,7 @@ namespace eskf {
   }
 
   void ESKF::updateMagnetometer(const vec3& m, uint64_t time_usec, scalar_t dt) {
-    // transform position from local ENU to local NED frame
+    // transform mag from local ENU to local NED frame
     vec3 m_nb = q_NED2ENU.inverse().toRotationMatrix() * m;
 
     // limit data rate to prevent data being lost
