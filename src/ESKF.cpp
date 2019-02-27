@@ -1920,8 +1920,8 @@ namespace eskf {
   }
 
   void ESKF::updateMagnetometer(const vec3& m, uint64_t time_usec, scalar_t dt) {
-    // transform mag from local ENU to local NED frame
-    vec3 m_nb = q_NED2ENU.inverse().toRotationMatrix() * m;
+    // convert FLU to FRD body frame IMU data
+    vec3 m_nb = q_FLU2FRD.toRotationMatrix() * m;
 
     // limit data rate to prevent data being lost
     if ((time_usec - time_last_mag_) > min_obs_interval_us_) {
