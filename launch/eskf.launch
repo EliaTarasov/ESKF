@@ -3,7 +3,7 @@
   <arg name="eskf_node" default="eskf"/>
 
   <!-- IMU topic to use -->
-  <arg name="imu_topic" default="/mavros/imu/data_raw"/>
+  <arg name="imu_topic" default="/mavros/imu/data"/>
 
   <!-- MAG topic to use -->
   <arg name="mag_topic" default="/mavros/imu/mag"/>
