@@ -20,6 +20,9 @@
   <!-- EXTENDED STATE topic to use -->
   <arg name="extended_state_topic" default="/mavros/extended_state"/>
 
+  <!-- RANGEFINDER topic to use -->
+  <arg name="rangefinder_topic" default="/mavros/distance_sensor/hrlv_ez4_pub"/>
+
   <node pkg="eskf" name="$(arg eskf_node)" type="eskf" output="screen">
     <remap from="~imu" to="$(arg imu_topic)"/>
     <remap from="~vision" to="$(arg vision_topic)"/>
@@ -27,8 +30,9 @@
     <remap from="~optical_flow" to="$(arg optical_flow_topic)"/>
     <remap from="~mag" to="$(arg mag_topic)"/>
     <remap from="~extended_state" to="$(arg extended_state_topic)"/>
+    <remap from="~rangefinder" to="$(arg rangefinder_topic)"/>
 
-    <param name="fusion_mask" value="568"  type="int"/>
+    <param name="fusion_mask" value="776"  type="int"/>
     <!-- 
      1 - vision position. 
      2 - vision yaw. 
@@ -38,7 +42,7 @@
      32 - gps height.
      64 - mag inhibit. 
      128 - optical flow. 
-     256 - lidar height.
+     256 - rangefinder height.
      512 - mag heading.
      -->
 

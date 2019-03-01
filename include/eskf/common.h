@@ -8,6 +8,7 @@
 #define GPS_MAX_INTERVAL	1e6	///< Maximum allowable time interval between external gps system measurements (uSec)
 #define OPTICAL_FLOW_INTERVAL	2e5	///< Maximum allowable time interval between optical flow system measurements (uSec)
 #define MAG_INTERVAL		2e5	///< Maximum allowable time interval between mag system measurements (uSec)
+#define RANGE_MAX_INTERVAL	1e6	///< Maximum allowable time interval between rangefinder system measurements (uSec)
 
 #define MASK_EV_POS 1<<0
 #define MASK_EV_YAW 1<<1
@@ -17,7 +18,7 @@
 #define MASK_GPS_HGT 1<<5
 #define MASK_MAG_INHIBIT 1<<6
 #define MASK_OPTICAL_FLOW 1<<7
-#define MASK_LIDAR 1<<8
+#define MASK_RANGEFINDER 1<<8
 #define MASK_MAG_HEADING 1<<9
 #define MASK_EV (MASK_EV_POS | MASK_EV_YAW | MASK_EV_HGT)
 #define MASK_GPS (MASK_GPS_POS | MASK_GPS_VEL | MASK_GPS_HGT)

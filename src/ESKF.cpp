@@ -834,8 +834,17 @@ namespace eskf {
 
       // Fuse range finder data if available
       if (range_data_ready_) {
-	rng_hgt_ = true; //TODO MAKE AS ECL
-        fuseHagl();
+        // determine if we should use the hgt observation
+        if ((fusion_mask_ & MASK_RANGEFINDER) && (!rng_hgt_)) {
+          if (time_last_imu_ - time_last_range_ < 2 * RANGE_MAX_INTERVAL) {
+            rng_hgt_ = true;
+            printf("ESKF commencing rng fusion\n");
+          }
+        }
+
+        if(rng_hgt_) {
+          fuseHagl();
+        }
 
         // update range sensor angle parameters in case they have changed
         // we do this here to avoid doing those calculations at a high rate
@@ -1916,6 +1925,18 @@ namespace eskf {
 
         range_buffer_.push(range_sample_new);
       }
+    }
+  }
+
+  void ESKF::updateRangeFinder(scalar_t range, uint64_t time_us, scalar_t dt) {
+    // check for arrival of new range data at the fusion time horizon
+    if (time_us - time_last_range_ > min_obs_interval_us_) {
+      rangeSample range_sample_new;
+      range_sample_new.rng = range;
+      range_sample_new.time_us = time_us - range_delay_ms_ * 1000;
+      time_last_range_ = time_us;
+
+      range_buffer_.push(range_sample_new);
     }
   }
 

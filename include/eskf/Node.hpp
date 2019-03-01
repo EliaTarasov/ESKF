@@ -4,6 +4,7 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/MagneticField.h>
+#include <sensor_msgs/Range.h>
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
@@ -34,6 +35,7 @@ namespace eskf {
     ros::Subscriber subOpticalFlowPose_;
     ros::Subscriber subMagPose_;
     ros::Subscriber subExtendedState_;
+    ros::Subscriber subRangeFinderPose_;
 
     // implementation
     eskf::ESKF eskf_;
@@ -42,6 +44,7 @@ namespace eskf {
     ros::Time prevStampGpsPose_;
     ros::Time prevStampOpticalFlowPose_;
     ros::Time prevStampMagPose_;
+    ros::Time prevStampRangeFinderPose_;
     ros::Timer pubTimer_;
     bool init_;
 
@@ -52,6 +55,7 @@ namespace eskf {
     void opticalFlowCallback(const mavros_msgs::OpticalFlowRadConstPtr&);
     void magCallback(const sensor_msgs::MagneticFieldConstPtr&);
     void extendedStateCallback(const mavros_msgs::ExtendedStateConstPtr&);
+    void rangeFinderCallback(const sensor_msgs::RangeConstPtr&);
     void publishState(const ros::TimerEvent&);
   };
 } //  namespace eskf

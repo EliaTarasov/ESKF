@@ -19,6 +19,7 @@ namespace eskf {
     void updateVision(const quat& q, const vec3& p, uint64_t time_us, scalar_t dt);
     void updateGps(const vec3& v, const vec3& p, uint64_t time_us, scalar_t dt);
     void updateOpticalFlow(const vec2& int_xy, const vec2& int_xy_gyro, uint32_t integration_time_us, scalar_t distance, uint8_t quality, uint64_t time_us, scalar_t dt);
+    void updateRangeFinder(scalar_t range, uint64_t time_us, scalar_t dt);
     void updateMagnetometer(const vec3& m, uint64_t time_us, scalar_t dt);
     void updateLandedState(uint8_t landed_state);
 

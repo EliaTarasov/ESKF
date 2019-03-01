@@ -29,6 +29,10 @@ Node::Node(const ros::NodeHandle &nh, const ros::NodeHandle &pnh) : nh_(pnh), in
     ROS_INFO("Subscribing to mag");
     subMagPose_ = nh_.subscribe("mag", 1, &Node::magCallback, this);
   }
+  if(fusion_mask & MASK_RANGEFINDER) {
+    ROS_INFO("Subscribing to rangefinder");
+    subRangeFinderPose_ = nh_.subscribe("rangefinder", 1, &Node::rangeFinderCallback, this);
+  }
 
   eskf_.setFusionMask(fusion_mask);
 
@@ -105,6 +109,15 @@ void Node::magCallback(const sensor_msgs::MagneticFieldConstPtr& magMsg) {
     eskf_.updateMagnetometer(m, static_cast<uint64_t>(magMsg->header.stamp.toSec() * 1e6f), delta);
   }
   prevStampMagPose_ = magMsg->header.stamp;
+}
+
+void Node::rangeFinderCallback(const sensor_msgs::RangeConstPtr& rangeMsg) {
+  if (prevStampRangeFinderPose_.sec != 0) {
+    const double delta = (rangeMsg->header.stamp - prevStampRangeFinderPose_).toSec();
+    // get rangefinder measurements
+    eskf_.updateRangeFinder(rangeMsg->range, static_cast<uint64_t>(rangeMsg->header.stamp.toSec() * 1e6f), delta);
+  }
+  prevStampRangeFinderPose_ = rangeMsg->header.stamp;
 }
 
 void Node::extendedStateCallback(const mavros_msgs::ExtendedStateConstPtr& extendedStateMsg) {
