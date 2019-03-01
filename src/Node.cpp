@@ -130,8 +130,8 @@ void Node::publishState(const ros::TimerEvent&) {
   odom.pose.pose.position.y = position[1];
   odom.pose.pose.position.z = position[2];
   odom.twist.twist.linear.x = velocity[0];
-  odom.twist.twist.linear.x = velocity[1];
-  odom.twist.twist.linear.x = velocity[2];
+  odom.twist.twist.linear.y = velocity[1];
+  odom.twist.twist.linear.z = velocity[2];
   odom.pose.pose.orientation.w = e2g.w();
   odom.pose.pose.orientation.x = e2g.x();
   odom.pose.pose.orientation.y = e2g.y();
