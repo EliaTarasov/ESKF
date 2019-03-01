@@ -32,7 +32,7 @@
     <remap from="~extended_state" to="$(arg extended_state_topic)"/>
     <remap from="~rangefinder" to="$(arg rangefinder_topic)"/>
 
-    <param name="fusion_mask" value="776"  type="int"/>
+    <param name="fusion_mask" value="7"  type="int"/>
     <!-- 
      1 - vision position. 
      2 - vision yaw. 
